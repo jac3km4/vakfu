@@ -1,0 +1,15 @@
+[package]
+name = "vakfu"
+version = "0.1.0"
+authors = ["Jacek Malec <jac3km4@gmail.com>"]
+
+[dependencies]
+vulkano = "0.10.0"
+vulkano-win = "0.10.0"
+vulkano-shader-derive = "0.10.0"
+winit = "0.17.2"
+zip = "0.4"
+byteorder = "1"
+time = "0.1.40"
+cgmath = "0.16.1"
+arrayvec = "0.4.7"
