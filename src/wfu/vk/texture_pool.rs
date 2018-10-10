@@ -1,93 +1,66 @@
 extern crate vulkano;
 
-use std::collections::hash_map::VacantEntry;
-use std::collections::HashMap;
-use std::marker::PhantomData;
+use std::collections::{HashMap, HashSet};
+use std::iter::*;
 use std::sync::Arc;
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::Queue;
-use vulkano::pipeline::GraphicsPipelineAbstract;
-use vulkano::sampler::Sampler;
+use vulkano::format::R8G8B8A8Srgb;
+use vulkano::image::ImmutableImage;
 use vulkano::sync::GpuFuture;
 use wfu::util::indexed::Indexed;
 use wfu::vk::vk_texture::VkTexture;
-use wfu::vk::VkTexDescriptorSet;
 
-pub struct TexturePool<P, T, R>
-where
-    T: VkTexture,
-    P: GraphicsPipelineAbstract,
-    R: Indexed<i32, T>,
-{
-    textures: R,
-    cache: HashMap<i32, Arc<VkTexDescriptorSet<P>>>,
-    pipeline: Arc<P>,
-    sampler: Arc<Sampler>,
-    pub queue: Arc<Queue>,
-    phantom_t: PhantomData<T>,
+pub struct TexturePool {
+    pub indices: HashMap<i32, u32>,
 }
 
-impl<P, T, R> TexturePool<P, T, R>
-where
-    P: GraphicsPipelineAbstract,
-    T: VkTexture,
-    R: Indexed<i32, T>,
-{
-    pub fn new(
-        loader: R,
-        pipeline: Arc<P>,
-        sampler: Arc<Sampler>,
+impl TexturePool {
+    pub fn new<R: Indexed<i32, T>, T: VkTexture>(
+        loader: &mut R,
+        working_set: HashSet<i32>,
         queue: Arc<Queue>,
-    ) -> TexturePool<P, T, R> {
-        TexturePool {
-            textures: loader,
-            cache: HashMap::new(),
-            pipeline,
-            sampler,
-            queue,
-            phantom_t: PhantomData,
-        }
-    }
+    ) -> (TexturePool, Vec<Arc<ImmutableImage<R8G8B8A8Srgb>>>) {
+        let (default, cmd) = {
+            let empty: Vec<u8> = vec![0, 0, 0, 0];
+            vulkano::image::immutable::ImmutableImage::from_iter(
+                empty.iter().cloned(),
+                vulkano::image::Dimensions::Dim2d { width: 1, height: 1 },
+                vulkano::format::R8G8B8A8Srgb,
+                queue.clone()).unwrap()
+        };
 
-    pub fn get_texture(&mut self, id: i32) -> Option<Arc<VkTexDescriptorSet<P>>> {
-        use std::collections::hash_map::Entry;
+        cmd.flush().unwrap();
 
-        match self.cache.entry(id) {
-            Entry::Occupied(texture) => Some(texture.get().clone()),
-            Entry::Vacant(slot) => {
-                let pipeline = self.pipeline.clone();
-                let sampler = self.sampler.clone();
-                let queue = self.queue.clone();
-                self.textures
-                    .at(id)
-                    .map(|texture| initialize_texture(texture, pipeline, sampler, queue, slot))
-            }
-        }
+
+        let tmp = working_set.iter().filter_map(|e| {
+            loader
+                .at(*e)
+                .map(|texture| (e, initialize_texture(texture, queue.clone())))
+        }).collect::<Vec<_>>();
+
+        let indices =
+            tmp.iter().enumerate().map(|(i, (tex_id, _))| (**tex_id, i as u32))
+                .collect::<HashMap<i32, u32>>();
+
+        let images = tmp.iter()
+            .map(|(_, t)| t.clone())
+            .chain(repeat(default))
+            .take(2048)
+            .collect::<Vec<_>>();
+
+        (TexturePool { indices }, images)
     }
 }
 
-fn initialize_texture<P, T>(
+fn initialize_texture<T>(
     texture: T,
-    pipeline: Arc<P>,
-    sampler: Arc<Sampler>,
     queue: Arc<Queue>,
-    slot: VacantEntry<i32, Arc<VkTexDescriptorSet<P>>>,
-) -> Arc<VkTexDescriptorSet<P>>
-where
-    P: GraphicsPipelineAbstract,
-    T: VkTexture,
+) -> Arc<ImmutableImage<R8G8B8A8Srgb>>
+    where
+        T: VkTexture,
 {
     let (image, cmd) = texture.load(queue);
 
     cmd.flush().unwrap();
-    let set = Arc::new(
-        PersistentDescriptorSet::start(pipeline, 0)
-            .add_sampled_image(image.clone(), sampler.clone())
-            .unwrap()
-            .build()
-            .unwrap(),
-    );
-
-    slot.insert(set.clone());
-    return set;
+    return image;
 }
