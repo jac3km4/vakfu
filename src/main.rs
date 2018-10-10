@@ -6,6 +6,8 @@ extern crate time;
 extern crate vulkano_win;
 extern crate winit;
 extern crate zip;
+#[macro_use]
+extern crate scan_fmt;
 
 use std::env;
 use std::fs::File;
@@ -23,13 +25,13 @@ use wfu::gfx::map::Map;
 use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::tgam::TgamLoader;
 use wfu::util::timer::Timer;
-use wfu::vk::texture_pool::TexturePool;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
+use wfu::vk::persistent::PersistentDescriptorSet;
+use vulkano::buffer::ImmutableBuffer;
 
 pub mod wfu;
 
-impl_vertex!(Vertex, position, tex_coords);
 
 const BLENDING: AttachmentBlend = AttachmentBlend {
     enabled: true,
@@ -51,7 +53,7 @@ fn main() {
     let path = args.get(1).expect("Expecting path as 1st param");
     let map_id = args.get(2).expect("Expecting map id as 2nd param");
 
-    let textures = TgamLoader::new(File::open(format!("{}\\{}", path, "gfx.jar")).unwrap());
+    let mut textures = TgamLoader::new(File::open(format!("{}\\{}", path, "gfx.jar")).unwrap());
 
     let element_library =
         ElementLibrary::load(File::open(format!("{}\\{}", path, "data.jar")).unwrap());
@@ -95,6 +97,13 @@ fn main() {
         [(queue_family, 0.5)].iter().cloned(),
     ).expect("failed to create device");
     let queue = queues.next().unwrap();
+
+    let (mut map, imgs) = Map::load(
+        queue.clone(),
+        File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
+        element_library,
+        &mut textures,
+    );
 
     let (mut swapchain, mut images) = {
         let caps = surface
@@ -161,15 +170,23 @@ fn main() {
         GraphicsPipeline::start()
             .vertex_input_single_buffer::<Vertex>()
             .vertex_shader(vs.main_entry_point(), ())
-            .triangle_strip()
+            .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(fs.main_entry_point(), ())
             .blend_collective(BLENDING)
             .cull_mode_back()
+            .depth_stencil_disabled()
             .render_pass(vulkano::framebuffer::Subpass::from(renderpass.clone(), 0).unwrap())
             .build(device.clone())
             .unwrap(),
     );
+
+    let desc =
+        Arc::new(PersistentDescriptorSet::start(pipeline.clone(), 0)
+            .add_sampled_images(imgs, sampler)
+            .unwrap()
+            .build()
+            .unwrap());
 
     let mut framebuffers: Option<Vec<Arc<Framebuffer<_, _>>>> = None;
 
@@ -187,17 +204,16 @@ fn main() {
         scissors: None,
     };
 
-    let pool = TexturePool::new(textures, pipeline.clone(), sampler.clone(), queue.clone());
-
     let mut timer = Timer::new();
 
     let mut camera = camera::with_ease_in_out_quad();
 
-    let mut map = Map::load(
-        File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
-        pool,
-        element_library,
-    );
+    let all_vertices =
+        map.get_sprites()
+            .iter()
+            .flat_map(|sprite| &sprite.vertex)
+            .cloned()
+            .collect::<Vec<_>>();
 
     loop {
         let delta = timer.tick();
@@ -262,33 +278,36 @@ fn main() {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
 
-        let builder =
+
+        let (vertex_buffer, cmd) = ImmutableBuffer::<[Vertex]>::from_iter(
+            all_vertices.iter().cloned(),
+            vulkano::buffer::BufferUsage::all(),
+            queue.clone(),
+        ).expect("failed to create buffer");
+
+
+        let commands =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                 .unwrap()
                 .begin_render_pass(
                     framebuffers.as_ref().unwrap()[image_num].clone(),
                     false,
                     vec![[0.0, 0.0, 0.0, 1.0].into()],
-                ).unwrap();
-
-        let commands = map
-            .get_patches()
-            .flat_map(|sprites| sprites)
-            .fold(builder, |acc, sprite| {
-                acc.draw(
+                ).unwrap()
+                .draw(
                     pipeline.clone(),
                     &dynamic_state,
-                    sprite.vertex.clone(),
-                    sprite.desc.clone(),
+                    vertex_buffer.clone(),
+                    desc.clone(),
                     matrix,
-                ).unwrap()
-            }).end_render_pass()
-            .unwrap()
-            .build()
-            .unwrap();
+                ).unwrap().end_render_pass()
+                .unwrap()
+                .build()
+                .unwrap();
 
         let future = previous_frame_end
             .join(future)
+            .join(cmd)
             .then_execute(queue.clone(), commands)
             .unwrap()
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
@@ -316,7 +335,6 @@ fn main() {
             } => done = true,
             winit::Event::DeviceEvent { event, device_id } => {
                 camera.handle(event);
-                map.set_abs_center(camera.get_abs_center());
             }
             _ => (),
         });

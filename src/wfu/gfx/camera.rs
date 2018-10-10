@@ -18,7 +18,7 @@ const DEFAULT_HEIGHT: f32 = 768f32;
 const SCREEN_WIDTH_RATIO: f32 = 9.765625E-4f32;
 const SCREEN_HEIGHT_RATIO: f32 = 0.0017361111f32;
 
-const ACCELERATION_FACTOR: f32 = 16f32;
+const ACCELERATION_FACTOR: f32 = 12_800f32;
 
 const MOVEMENT_SPEED: f32 = 0.4f32;
 const ZOOM_SPEED: f32 = 0.8f32;
@@ -44,8 +44,8 @@ impl<F: Fn(f32) -> f32> Camera<F> {
     }
 
     pub fn get_matrix(&self, screen_w: u32, screen_h: u32) -> Matrix4<f32> {
-        let x_factor = self.zoom_factor / (screen_w as f32 / DEFAULT_WIDTH);
-        let y_factor = self.zoom_factor / (screen_h as f32 / DEFAULT_HEIGHT);
+        let x_factor = self.zoom_factor / screen_w as f32;
+        let y_factor = self.zoom_factor / screen_h as f32;
 
         Matrix4::from_nonuniform_scale(x_factor, y_factor, 1.0f32)
             * Matrix4::from_translation(self.translation.extend(0f32))
