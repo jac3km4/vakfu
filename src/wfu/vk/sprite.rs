@@ -1,67 +1,62 @@
 extern crate vulkano;
 
-use std::sync::Arc;
-use vulkano::buffer::cpu_access::CpuAccessibleBuffer;
-use vulkano::device::Device;
-use vulkano::memory::pool::{PotentialDedicatedAllocation, StdMemoryPoolAlloc};
 use wfu::gfx::render_element::RenderElement;
 use wfu::gfx::world::world_element::WorldElement;
 use wfu::vk::vertex::Vertex;
-use wfu::vk::VkTexDescriptorSet;
 
-type VertexBuffer = CpuAccessibleBuffer<[Vertex], PotentialDedicatedAllocation<StdMemoryPoolAlloc>>;
-
-pub struct Sprite<P> {
-    pub vertex: Arc<VertexBuffer>,
-    pub desc: Arc<VkTexDescriptorSet<P>>,
+pub struct Sprite {
+    pub vertex: Vec<Vertex>,
     cell_x: i32,
     cell_y: i32,
 }
 
-impl<P> Sprite<P> {
+impl Sprite {
     pub fn new(
-        device: Arc<Device>,
         spec: &RenderElement,
         element: &WorldElement,
-        desc: Arc<VkTexDescriptorSet<P>>,
-    ) -> Sprite<P> {
+        tex_id: u32,
+    ) -> Sprite {
         let coords = &element.texture_coords;
 
-        let divisor = 1000.0f32;
+        let left = spec.get_x(element) as f32;
+        let top = spec.get_y(element) as f32;
+        let bottom = top - element.img_height as f32;
+        let right = left + element.img_width as f32;
 
-        let left = spec.get_x(element) as f32 / divisor;
-        let top = spec.get_y(element) as f32 / divisor;
-        let bottom = top - element.img_height as f32 / divisor;
-        let right = left + element.img_width as f32 / divisor;
+        let colors = [1.0f32, 1.0f32, 1.0f32];
+//            if spec.colors.len() == 3 {
+//                [spec.colors[0].max(0.0f32).min(1.0f32), spec.colors[1].max(0.0f32).min(1.0f32), spec.colors[2].max(0.0f32).min(1.0f32)]
+//            } else { [1.0f32, 1.0f32, 1.0f32] };
 
         let vertice1 = Vertex {
-            position: [left, -top],
-            tex_coords: [coords.left, coords.top],
-        };
-        let vertice2 = Vertex {
             position: [left, -bottom],
             tex_coords: [coords.left, coords.bottom],
+            colors,
+            tex_id
         };
-        let vertice3 = Vertex {
-            position: [right, -top],
-            tex_coords: [coords.right, coords.top],
-        };
-        let vertice4 = Vertex {
+        let vertice2 = Vertex {
             position: [right, -bottom],
             tex_coords: [coords.right, coords.bottom],
+            colors,
+            tex_id
+        };
+        let vertice3 = Vertex {
+            position: [left, -top],
+            tex_coords: [coords.left, coords.top],
+            colors,
+            tex_id
+        };
+        let vertice4 = Vertex {
+            position: [right, -top],
+            tex_coords: [coords.right, coords.top],
+            colors,
+            tex_id
         };
 
-        let vertices: [Vertex; 4] = [vertice1, vertice2, vertice3, vertice4];
-
-        let vertex_buffer = CpuAccessibleBuffer::<[Vertex]>::from_iter(
-            device.clone(),
-            vulkano::buffer::BufferUsage::all(),
-            vertices.iter().cloned(),
-        ).expect("failed to create buffer");
+        let vertices = vec![vertice1, vertice2, vertice3, vertice3, vertice2, vertice4];
 
         Sprite {
-            desc,
-            vertex: vertex_buffer,
+            vertex: vertices,
             cell_x: spec.cell_x,
             cell_y: spec.cell_y,
         }
