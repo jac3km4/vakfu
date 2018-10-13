@@ -6,16 +6,10 @@ use wfu::vk::vertex::Vertex;
 
 pub struct Sprite {
     pub vertex: Vec<Vertex>,
-    cell_x: i32,
-    cell_y: i32,
 }
 
 impl Sprite {
-    pub fn new(
-        spec: &RenderElement,
-        element: &WorldElement,
-        tex_id: u32,
-    ) -> Sprite {
+    pub fn new(spec: &RenderElement, element: &WorldElement, tex_id: u32) -> Sprite {
         let coords = &element.texture_coords;
 
         let left = spec.get_x(element) as f32;
@@ -23,10 +17,11 @@ impl Sprite {
         let bottom = top - element.img_height as f32;
         let right = left + element.img_width as f32;
 
-        let colors =
-            if spec.colors.len() == 3 {
-                [spec.colors[0], spec.colors[1], spec.colors[2]]
-            } else { [0.5f32, 0.5f32, 0.5f32] };
+        let colors = if spec.colors.len() == 3 {
+            [spec.colors[0], spec.colors[1], spec.colors[2]]
+        } else {
+            [0.5f32, 0.5f32, 0.5f32]
+        };
 
         let vertice1 = Vertex {
             position: [left, -bottom],
@@ -57,8 +52,6 @@ impl Sprite {
 
         Sprite {
             vertex: vertices,
-            cell_x: spec.cell_x,
-            cell_y: spec.cell_y,
         }
     }
 }

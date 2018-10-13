@@ -12,6 +12,7 @@ extern crate scan_fmt;
 use std::env;
 use std::fs::File;
 use std::sync::Arc;
+use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::framebuffer::Framebuffer;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
@@ -25,13 +26,11 @@ use wfu::gfx::map::Map;
 use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::tgam::TgamLoader;
 use wfu::util::timer::Timer;
+use wfu::vk::persistent::PersistentDescriptorSet;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
-use wfu::vk::persistent::PersistentDescriptorSet;
-use vulkano::buffer::ImmutableBuffer;
 
 pub mod wfu;
-
 
 const BLENDING: AttachmentBlend = AttachmentBlend {
     enabled: true,
@@ -181,12 +180,13 @@ fn main() {
             .unwrap(),
     );
 
-    let desc =
-        Arc::new(PersistentDescriptorSet::start(pipeline.clone(), 0)
+    let desc = Arc::new(
+        PersistentDescriptorSet::start(pipeline.clone(), 0)
             .add_sampled_images(imgs, sampler)
             .unwrap()
             .build()
-            .unwrap());
+            .unwrap(),
+    );
 
     let mut framebuffers: Option<Vec<Arc<Framebuffer<_, _>>>> = None;
 
@@ -208,12 +208,12 @@ fn main() {
 
     let mut camera = camera::with_ease_in_out_quad();
 
-    let all_vertices =
-        map.get_sprites()
-            .iter()
-            .flat_map(|sprite| &sprite.vertex)
-            .cloned()
-            .collect::<Vec<_>>();
+    let all_vertices = map
+        .get_sprites()
+        .iter()
+        .flat_map(|sprite| &sprite.vertex)
+        .cloned()
+        .collect::<Vec<_>>();
 
     loop {
         let delta = timer.tick();
@@ -278,13 +278,11 @@ fn main() {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
 
-
         let (vertex_buffer, cmd) = ImmutableBuffer::<[Vertex]>::from_iter(
             all_vertices.iter().cloned(),
             vulkano::buffer::BufferUsage::all(),
             queue.clone(),
         ).expect("failed to create buffer");
-
 
         let commands =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
@@ -300,7 +298,8 @@ fn main() {
                     vertex_buffer.clone(),
                     desc.clone(),
                     matrix,
-                ).unwrap().end_render_pass()
+                ).unwrap()
+                .end_render_pass()
                 .unwrap()
                 .build()
                 .unwrap();
