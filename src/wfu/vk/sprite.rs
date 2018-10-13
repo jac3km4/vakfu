@@ -23,34 +23,34 @@ impl Sprite {
         let bottom = top - element.img_height as f32;
         let right = left + element.img_width as f32;
 
-        let colors = [1.0f32, 1.0f32, 1.0f32];
-//            if spec.colors.len() == 3 {
-//                [spec.colors[0].max(0.0f32).min(1.0f32), spec.colors[1].max(0.0f32).min(1.0f32), spec.colors[2].max(0.0f32).min(1.0f32)]
-//            } else { [1.0f32, 1.0f32, 1.0f32] };
+        let colors =
+            if spec.colors.len() == 3 {
+                [spec.colors[0], spec.colors[1], spec.colors[2]]
+            } else { [0.5f32, 0.5f32, 0.5f32] };
 
         let vertice1 = Vertex {
             position: [left, -bottom],
             tex_coords: [coords.left, coords.bottom],
             colors,
-            tex_id
+            tex_id,
         };
         let vertice2 = Vertex {
             position: [right, -bottom],
             tex_coords: [coords.right, coords.bottom],
             colors,
-            tex_id
+            tex_id,
         };
         let vertice3 = Vertex {
             position: [left, -top],
             tex_coords: [coords.left, coords.top],
             colors,
-            tex_id
+            tex_id,
         };
         let vertice4 = Vertex {
             position: [right, -top],
             tex_coords: [coords.right, coords.top],
             colors,
-            tex_id
+            tex_id,
         };
 
         let vertices = vec![vertice1, vertice2, vertice3, vertice3, vertice2, vertice4];
