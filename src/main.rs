@@ -271,7 +271,7 @@ fn main() {
             );
         }
 
-        let (image_num, future) =
+        let (image_num, acquire_swapchain) =
             match vulkano::swapchain::acquire_next_image(swapchain.clone(), None) {
                 Ok(r) => r,
                 Err(vulkano::swapchain::AcquireError::OutOfDate) => {
@@ -285,15 +285,15 @@ fn main() {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
 
-        let (vertex_buffer, cmd) = ImmutableBuffer::<[Vertex]>::from_iter(
+        let (vertex_buffer, upload_vertex) = ImmutableBuffer::<[Vertex]>::from_iter(
             all_vertices.iter().cloned(),
-            vulkano::buffer::BufferUsage::all(),
+            vulkano::buffer::BufferUsage::vertex_buffer(),
             queue.clone(),
         ).expect("failed to create buffer");
 
-        let (index_buffer, cmd2) = ImmutableBuffer::from_iter(
+        let (index_buffer, upload_index) = ImmutableBuffer::from_iter(
             all_indexes.iter().cloned(),
-            vulkano::buffer::BufferUsage::all(),
+            vulkano::buffer::BufferUsage::index_buffer(),
             queue.clone(),
         ).expect("failed to create buffer");
 
@@ -319,9 +319,9 @@ fn main() {
                 .unwrap();
 
         let future = previous_frame_end
-            .join(future)
-            .join(cmd)
-            .join(cmd2)
+            .join(acquire_swapchain)
+            .join(upload_vertex)
+            .join(upload_index)
             .then_execute(queue.clone(), commands)
             .unwrap()
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
