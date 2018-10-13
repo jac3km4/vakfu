@@ -48,10 +48,19 @@ impl Sprite {
             tex_id,
         };
 
-        let vertices = vec![vertice1, vertice2, vertice3, vertice3, vertice2, vertice4];
+        let vertices = vec![vertice1, vertice2, vertice3, vertice4];
 
-        Sprite {
-            vertex: vertices,
-        }
+        Sprite { vertex: vertices }
     }
+}
+
+pub fn indexes_at(offset: u32) -> Vec<u32> {
+    vec![
+        offset * 4 + 0u32,
+        offset * 4 + 1u32,
+        offset * 4 + 2u32,
+        offset * 4 + 2u32,
+        offset * 4 + 1u32,
+        offset * 4 + 3u32,
+    ]
 }

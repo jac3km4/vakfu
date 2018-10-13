@@ -11,6 +11,7 @@ extern crate scan_fmt;
 
 use std::env;
 use std::fs::File;
+use std::iter::repeat;
 use std::sync::Arc;
 use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
@@ -27,6 +28,7 @@ use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::tgam::TgamLoader;
 use wfu::util::timer::Timer;
 use wfu::vk::persistent::PersistentDescriptorSet;
+use wfu::vk::sprite::indexes_at;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
 
@@ -215,6 +217,11 @@ fn main() {
         .cloned()
         .collect::<Vec<_>>();
 
+    let all_indexes = (0..map.get_sprites().len() as u32)
+        .take(map.get_sprites().len())
+        .flat_map(|i| indexes_at(i))
+        .collect::<Vec<_>>();
+
     loop {
         let delta = timer.tick();
         camera.update(delta);
@@ -284,6 +291,12 @@ fn main() {
             queue.clone(),
         ).expect("failed to create buffer");
 
+        let (index_buffer, cmd2) = ImmutableBuffer::from_iter(
+            all_indexes.iter().cloned(),
+            vulkano::buffer::BufferUsage::all(),
+            queue.clone(),
+        ).expect("failed to create buffer");
+
         let commands =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                 .unwrap()
@@ -292,10 +305,11 @@ fn main() {
                     false,
                     vec![[0.0, 0.0, 0.0, 1.0].into()],
                 ).unwrap()
-                .draw(
+                .draw_indexed(
                     pipeline.clone(),
                     &dynamic_state,
                     vertex_buffer.clone(),
+                    index_buffer.clone(),
                     desc.clone(),
                     matrix,
                 ).unwrap()
@@ -307,6 +321,7 @@ fn main() {
         let future = previous_frame_end
             .join(future)
             .join(cmd)
+            .join(cmd2)
             .then_execute(queue.clone(), commands)
             .unwrap()
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
