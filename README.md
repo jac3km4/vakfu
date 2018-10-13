@@ -1,7 +1,7 @@
 # vakfu
 Vulkan renderer for Wakfu
 
-![Imgur](https://i.imgur.com/sqxzak2.png)
+![Imgur](https://i.imgur.com/RcOykz6.png)
 
 # building
 
