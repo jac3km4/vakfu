@@ -23,44 +23,8 @@ impl RenderElementPatch {
         y: i32,
     ) -> Option<RenderElementPatch> {
         match archive.by_name(format!("{}_{}", x, y).as_ref()) {
-            Ok(entry) => Some(
-                DecoderCursor::new(entry)
-                    .decode::<RenderElementPatch>()
-                    .sorted(),
-            ),
+            Ok(entry) => Some(DecoderCursor::new(entry).decode::<RenderElementPatch>()),
             _ => None,
-        }
-    }
-
-    pub fn sorted(self) -> RenderElementPatch {
-        use std::num::Wrapping;
-
-        let mut indexes = self
-            .elements
-            .iter()
-            .enumerate()
-            .map(|tuple| (Wrapping(tuple.1.hashcode()) << 13usize).0 + tuple.0 as i64)
-            .collect::<Vec<_>>();
-
-        indexes.sort();
-
-        let mut output: Vec<RenderElement> = Vec::with_capacity(self.elements.len());
-
-        let mut insert_idx = 0;
-        for code in indexes {
-            let idx = code & 0x3FFFi64;
-            let mut element = self.elements[idx as usize].clone();
-            element.z = insert_idx;
-            if code < 0 {
-                output.push(element)
-            } else {
-                output.insert(insert_idx as usize, element);
-                insert_idx += 1;
-            }
-        }
-        RenderElementPatch {
-            elements: output,
-            ..self
         }
     }
 }
