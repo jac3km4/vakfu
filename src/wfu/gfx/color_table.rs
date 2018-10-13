@@ -36,7 +36,7 @@ fn allocate_colors(tpe: u8) -> Vec<f32> {
     Vec::with_capacity(size as usize)
 }
 
-fn teint_value(v: u8) -> f32 {
+fn teint_value(v: i8) -> f32 {
     v as f32 / 255.0f32 + 0.5f32
 }
 
