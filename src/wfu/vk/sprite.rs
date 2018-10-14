@@ -48,9 +48,9 @@ impl Sprite {
             tex_id,
         };
 
-        let vertices = vec![vertice1, vertice2, vertice3, vertice4];
+        let vertex = vec![vertice1, vertice2, vertice3, vertice4];
 
-        Sprite { vertex: vertices }
+        Sprite { vertex }
     }
 }
 

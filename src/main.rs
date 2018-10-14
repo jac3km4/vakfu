@@ -11,7 +11,6 @@ extern crate scan_fmt;
 
 use std::env;
 use std::fs::File;
-use std::iter::repeat;
 use std::sync::Arc;
 use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
@@ -155,12 +154,12 @@ fn main() {
 
     let sampler = Sampler::new(
         device.clone(),
-        vulkano::sampler::Filter::Linear,
+        vulkano::sampler::Filter::Nearest,
         vulkano::sampler::Filter::Linear,
         vulkano::sampler::MipmapMode::Nearest,
-        vulkano::sampler::SamplerAddressMode::Repeat,
-        vulkano::sampler::SamplerAddressMode::Repeat,
-        vulkano::sampler::SamplerAddressMode::Repeat,
+        vulkano::sampler::SamplerAddressMode::ClampToEdge,
+        vulkano::sampler::SamplerAddressMode::ClampToEdge,
+        vulkano::sampler::SamplerAddressMode::ClampToEdge,
         0.0,
         1.0,
         0.0,
@@ -221,6 +220,8 @@ fn main() {
         .take(map.get_sprites().len())
         .flat_map(|i| indexes_at(i))
         .collect::<Vec<_>>();
+
+    let mut focused = true;
 
     loop {
         let delta = timer.tick();
@@ -347,8 +348,14 @@ fn main() {
                 event: winit::WindowEvent::CloseRequested,
                 ..
             } => done = true,
+            winit::Event::WindowEvent {
+                event: winit::WindowEvent::Focused(v),
+                ..
+            } => focused = v,
             winit::Event::DeviceEvent { event, device_id } => {
-                camera.handle(event);
+                if focused {
+                    camera.handle(event)
+                };
             }
             _ => (),
         });
