@@ -36,7 +36,7 @@ pub fn with_ease_in_out_quad() -> Camera<impl Fn(f32) -> f32> {
 impl<F: Fn(f32) -> f32> Camera<F> {
     pub fn new(ease: F) -> Camera<F> {
         Camera {
-            zoom_factor: 3.0f32,
+            zoom_factor: 2.0f32,
             ease,
             accel: Matrix2::new(0.0f32, 0.0f32, 0.0f32, 0.0f32),
             translation: Vector2 { x: 0f32, y: 0f32 },
