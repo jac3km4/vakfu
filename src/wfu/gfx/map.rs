@@ -10,7 +10,7 @@ use std::sync::Arc;
 use vulkano::device::Queue;
 use vulkano::format::R8G8B8A8Srgb;
 use vulkano::image::ImmutableImage;
-use wfu::gfx::render_element::RenderElementPatch;
+use wfu::gfx::render_element::{RenderElementPatch, parse_patch};
 use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::decoder::DecoderCursor;
 use wfu::util::indexed::Indexed;
@@ -39,8 +39,8 @@ impl Map {
 
         for i in 0..len {
             let entry = archive.by_index(i).unwrap();
-            match scan_fmt!(entry.name(), "{}_{}", i32, i32) {
-                (Some(x), Some(y)) => {
+            match parse_patch(entry.name()) {
+                Some((x, y)) => {
                     xys.push(Vector2 { x, y });
                     let patch = DecoderCursor::new(entry).decode::<RenderElementPatch>();
                     working_set.extend(patch.elements.iter().filter_map(|e| {

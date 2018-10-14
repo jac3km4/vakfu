@@ -29,6 +29,16 @@ impl RenderElementPatch {
     }
 }
 
+pub fn parse_patch(name: &str) -> Option<(i32, i32)> {
+    match name.split('_').collect::<Vec<&str>>().as_slice() {
+        [a, b] =>
+            i32::from_str_radix(a, 10).ok().and_then(|x|
+                i32::from_str_radix(b, 10).ok().map(|y| (x, y))
+            ),
+        _ => None
+    }
+}
+
 impl<R: Read> Decoder<R> for RenderElementPatch {
     fn decode(cur: &mut DecoderCursor<R>) -> Self {
         let min_x: i32 = cur.decode();

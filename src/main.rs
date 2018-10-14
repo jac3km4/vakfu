@@ -6,8 +6,6 @@ extern crate time;
 extern crate vulkano_win;
 extern crate winit;
 extern crate zip;
-#[macro_use]
-extern crate scan_fmt;
 
 use std::env;
 use std::fs::File;
