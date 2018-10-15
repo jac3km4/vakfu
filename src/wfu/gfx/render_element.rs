@@ -120,16 +120,16 @@ pub struct RenderElement {
 }
 
 impl RenderElement {
-    pub fn get_x(&self, world_element: &WorldElement) -> i32 {
-        iso_to_screen_x(self.cell_x, self.cell_y) - world_element.origin_x as i32
+    pub fn get_x(&self, world_element: &WorldElement) -> f32 {
+        iso_to_screen_x(self.cell_x, self.cell_y) - world_element.origin_x as f32
     }
 
-    pub fn get_y(&self, world_element: &WorldElement) -> i32 {
+    pub fn get_y(&self, world_element: &WorldElement) -> f32 {
         iso_to_screen_y(
             self.cell_x,
             self.cell_y,
-            self.display.cell_z as i32 - self.display.height as i32,
-        ) + world_element.origin_y as i32
+            (self.display.cell_z - self.display.height as i16) as i32,
+        ) + world_element.origin_y as f32
     }
 
     pub fn hashcode(&self) -> i64 {
