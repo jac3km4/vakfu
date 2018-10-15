@@ -152,9 +152,9 @@ fn main() {
 
     let sampler = Sampler::new(
         device.clone(),
-        vulkano::sampler::Filter::Nearest,
         vulkano::sampler::Filter::Linear,
-        vulkano::sampler::MipmapMode::Nearest,
+        vulkano::sampler::Filter::Linear,
+        vulkano::sampler::MipmapMode::Linear,
         vulkano::sampler::SamplerAddressMode::ClampToEdge,
         vulkano::sampler::SamplerAddressMode::ClampToEdge,
         vulkano::sampler::SamplerAddressMode::ClampToEdge,
