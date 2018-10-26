@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::sync::Arc;
 use vulkano::device::Queue;
-use vulkano::format::R8G8B8A8Srgb;
+use vulkano::format::R8G8B8A8Unorm;
 use vulkano::image::ImmutableImage;
 use wfu::gfx::render_element::{RenderElementPatch, parse_patch};
 use wfu::gfx::world::library::ElementLibrary;
@@ -28,7 +28,7 @@ impl Map {
         reader: S,
         library: ElementLibrary,
         loader: &mut R,
-    ) -> (Map, Vec<Arc<ImmutableImage<R8G8B8A8Srgb>>>) {
+    ) -> (Map, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>) {
         let mut archive = zip::ZipArchive::new(reader).unwrap();
 
         let len = archive.len();
