@@ -358,7 +358,7 @@ fn main() {
             _ => (),
         });
         if done {
-            return;
+            ::std::process::exit(0x0100);
         }
     }
 }

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::iter::*;
 use std::sync::Arc;
 use vulkano::device::Queue;
-use vulkano::format::R8G8B8A8Srgb;
+use vulkano::format::R8G8B8A8Unorm;
 use vulkano::image::ImmutableImage;
 use vulkano::sync::GpuFuture;
 use wfu::util::indexed::Indexed;
@@ -19,7 +19,7 @@ impl TexturePool {
         loader: &mut R,
         working_set: HashSet<i32>,
         queue: Arc<Queue>,
-    ) -> (TexturePool, Vec<Arc<ImmutableImage<R8G8B8A8Srgb>>>) {
+    ) -> (TexturePool, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>) {
         let (default, cmd) = {
             let empty: Vec<u8> = vec![0, 0, 0, 0];
             vulkano::image::immutable::ImmutableImage::from_iter(
@@ -28,7 +28,7 @@ impl TexturePool {
                     width: 1,
                     height: 1,
                 },
-                vulkano::format::R8G8B8A8Srgb,
+                vulkano::format::R8G8B8A8Unorm,
                 queue.clone(),
             ).unwrap()
         };
@@ -60,7 +60,7 @@ impl TexturePool {
     }
 }
 
-fn initialize_texture<T>(texture: T, queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Srgb>>
+fn initialize_texture<T>(texture: T, queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Unorm>>
 where
     T: VkTexture,
 {
