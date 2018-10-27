@@ -31,11 +31,10 @@ impl RenderElementPatch {
 
 pub fn parse_patch(name: &str) -> Option<(i32, i32)> {
     match name.split('_').collect::<Vec<&str>>().as_slice() {
-        [a, b] =>
-            i32::from_str_radix(a, 10).ok().and_then(|x|
-                i32::from_str_radix(b, 10).ok().map(|y| (x, y))
-            ),
-        _ => None
+        [a, b] => i32::from_str_radix(a, 10)
+            .ok()
+            .and_then(|x| i32::from_str_radix(b, 10).ok().map(|y| (x, y))),
+        _ => None,
     }
 }
 

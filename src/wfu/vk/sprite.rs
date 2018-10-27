@@ -1,16 +1,32 @@
 extern crate vulkano;
 
 use wfu::gfx::render_element::RenderElement;
-use wfu::gfx::world::world_element::WorldElement;
+use wfu::gfx::world::world_element::{Frames, WorldElement};
 use wfu::vk::vertex::Vertex;
 
-pub struct Sprite {
+pub struct Sprite<'a> {
     pub vertex: Vec<Vertex>,
+    element: &'a WorldElement,
 }
 
-impl Sprite {
-    pub fn new(spec: &RenderElement, element: &WorldElement, tex_id: u32) -> Sprite {
-        let coords = &element.texture_coords;
+impl<'a> Sprite<'a> {
+    pub fn update(&mut self, time: u64) {
+        match &self.element.frames {
+            Some(frames) => {
+                let coords = frames.get_texture_coords(time);
+                self.vertex[0].tex_coords = [coords.left, coords.bottom];
+                self.vertex[1].tex_coords = [coords.right, coords.bottom];
+                self.vertex[2].tex_coords = [coords.left, coords.top];
+                self.vertex[3].tex_coords = [coords.right, coords.top];
+            }
+            None => ()
+        }
+    }
+
+    pub fn new(spec: &RenderElement, element: &'a WorldElement, tex_id: u32) -> Sprite<'a> {
+        let coords =
+            element.frames.clone()
+                .map_or(element.texture_coords, |frames| frames.get_texture_coords(0u64));
 
         let left = spec.get_x(element) as f32;
         let top = spec.get_y(element) as f32;
@@ -50,7 +66,7 @@ impl Sprite {
 
         let vertex = vec![vertice1, vertice2, vertice3, vertice4];
 
-        Sprite { vertex }
+        Sprite { vertex, element }
     }
 }
 
