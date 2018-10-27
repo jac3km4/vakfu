@@ -1,5 +1,6 @@
 use wfu::util::first_greater_power_of_two;
 
+#[derive(Copy, Clone)]
 pub struct TextureCoords {
     pub left: f32,
     pub bottom: f32,

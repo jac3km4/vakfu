@@ -10,7 +10,10 @@ pub struct Sprite {
 
 impl Sprite {
     pub fn new(spec: &RenderElement, element: &WorldElement, tex_id: u32) -> Sprite {
-        let coords = &element.texture_coords;
+        let mut coords = element.texture_coords;
+        if element.anim_data.total_time > 0 {
+            coords = element.anim_data.get_texture_coords(element.properties_flag & 0x10 == 0x10)[0];
+        }
 
         let left = spec.get_x(element) as f32;
         let top = spec.get_y(element) as f32;

@@ -9,12 +9,12 @@ pub struct WorldElement {
     pub img_width: i16,
     pub img_height: i16,
     pub gfx_id: i32,
-    properties_flag: u8,
+    pub properties_flag: u8,
     visual_height: u8,
     pub visibility_mask: u8,
     export_mask: u8,
     shader: u8,
-    anim_data: AnimData,
+    pub anim_data: AnimData,
     pub texture_coords: TextureCoords,
     ground_sound: u8,
 }
@@ -57,7 +57,7 @@ impl<R: Read> Decoder<R> for WorldElement {
 }
 
 pub struct AnimData {
-    total_time: i32,
+    pub total_time: i32,
     img_width: i16,
     img_height: i16,
     img_width_total: i16,
