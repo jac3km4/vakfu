@@ -1,7 +1,5 @@
 extern crate itertools;
 
-use self::itertools::FoldWhile::{Continue, Done};
-use self::itertools::*;
 use std::io::Read;
 use wfu::gfx::texture_coords::TextureCoords;
 use wfu::io::decoder::{Decoder, DecoderCursor};

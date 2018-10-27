@@ -1,7 +1,7 @@
 extern crate vulkano;
 
 use wfu::gfx::render_element::RenderElement;
-use wfu::gfx::world::world_element::{Frames, WorldElement};
+use wfu::gfx::world::world_element::WorldElement;
 use wfu::vk::vertex::Vertex;
 
 pub struct Sprite<'a> {
