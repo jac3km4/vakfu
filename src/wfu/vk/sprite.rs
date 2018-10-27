@@ -19,14 +19,17 @@ impl<'a> Sprite<'a> {
                 self.vertex[2].tex_coords = [coords.left, coords.top];
                 self.vertex[3].tex_coords = [coords.right, coords.top];
             }
-            None => ()
+            None => (),
         }
     }
 
     pub fn new(spec: &RenderElement, element: &'a WorldElement, tex_id: u32) -> Sprite<'a> {
-        let coords =
-            element.frames.clone()
-                .map_or(element.texture_coords, |frames| frames.get_texture_coords(0u64));
+        let coords = element
+            .frames
+            .clone()
+            .map_or(element.texture_coords, |frames| {
+                frames.get_texture_coords(0u64)
+            });
 
         let left = spec.get_x(element) as f32;
         let top = spec.get_y(element) as f32;

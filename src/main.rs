@@ -356,15 +356,11 @@ fn main() {
                 event: winit::WindowEvent::Focused(v),
                 ..
             } => focused = v,
-            winit::Event::DeviceEvent { event, device_id } => {
-                if focused {
-                    camera.handle(event)
-                };
-            }
+            winit::Event::DeviceEvent { event, device_id } => camera.handle(event, focused),
             _ => (),
         });
         if done {
-            ::std::process::exit(0x0);
+            ::std::process::exit(0);
         }
     }
 }
