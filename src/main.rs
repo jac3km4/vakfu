@@ -99,7 +99,7 @@ fn main() {
     let (mut map, imgs) = Map::load(
         queue.clone(),
         File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
-        element_library,
+        &element_library,
         &mut textures,
     );
 
@@ -207,19 +207,14 @@ fn main() {
 
     let mut camera = camera::with_ease_in_out_quad();
 
-    let all_vertices = map
-        .get_sprites()
-        .iter()
-        .flat_map(|sprite| &sprite.vertex)
-        .cloned()
-        .collect::<Vec<_>>();
-
     let all_indexes = (0..map.get_sprites().len() as u32)
         .take(map.get_sprites().len())
         .flat_map(|i| indexes_at(i))
         .collect::<Vec<_>>();
 
     let mut focused = true;
+
+    let mut all_vertices: Vec<Vertex> = Vec::new();
 
     loop {
         let delta = timer.tick();
@@ -283,6 +278,17 @@ fn main() {
         let matrix = vertex_shader::ty::Matrix {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
+
+        let vertices = map
+            .get_sprites()
+            .iter_mut()
+            .flat_map(|sprite| {
+                sprite.update((timer.last_time * 1000f64) as u64);
+                &sprite.vertex
+            }).cloned();
+
+        all_vertices.clear();
+        all_vertices.extend(vertices);
 
         let (vertex_buffer, upload_vertex) = ImmutableBuffer::<[Vertex]>::from_iter(
             all_vertices.iter().cloned(),
@@ -358,7 +364,7 @@ fn main() {
             _ => (),
         });
         if done {
-            ::std::process::exit(0x0100);
+            ::std::process::exit(0x0);
         }
     }
 }

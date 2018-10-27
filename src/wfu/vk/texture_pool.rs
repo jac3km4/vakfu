@@ -53,7 +53,7 @@ impl TexturePool {
             .iter()
             .map(|(_, t)| t.clone())
             .chain(repeat(default))
-            .take(2048)
+            .take(2560)
             .collect::<Vec<_>>();
 
         (TexturePool { indices }, images)

@@ -2,7 +2,7 @@ extern crate time;
 
 pub struct Timer {
     last_time_to_s: f64,
-    last_time: f64,
+    pub last_time: f64,
     nb_frames: i32,
 }
 

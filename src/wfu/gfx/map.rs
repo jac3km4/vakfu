@@ -10,7 +10,7 @@ use std::sync::Arc;
 use vulkano::device::Queue;
 use vulkano::format::R8G8B8A8Unorm;
 use vulkano::image::ImmutableImage;
-use wfu::gfx::render_element::{RenderElementPatch, parse_patch};
+use wfu::gfx::render_element::{parse_patch, RenderElementPatch};
 use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::decoder::DecoderCursor;
 use wfu::util::indexed::Indexed;
@@ -18,17 +18,17 @@ use wfu::vk::sprite::Sprite;
 use wfu::vk::texture_pool::TexturePool;
 use wfu::vk::vk_texture::VkTexture;
 
-pub struct Map {
-    sprites: Vec<Sprite>,
+pub struct Map<'a> {
+    sprites: Vec<Sprite<'a>>,
 }
 
-impl Map {
+impl<'a> Map<'a> {
     pub fn load<T: VkTexture, R: Indexed<i32, T>, S: Read + Seek>(
         queue: Arc<Queue>,
         reader: S,
-        library: ElementLibrary,
+        library: &'a ElementLibrary,
         loader: &mut R,
-    ) -> (Map, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>) {
+    ) -> (Map<'a>, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>) {
         let mut archive = zip::ZipArchive::new(reader).unwrap();
 
         let len = archive.len();
@@ -78,7 +78,7 @@ impl Map {
         (map, images)
     }
 
-    pub fn get_sprites(&mut self) -> &Vec<Sprite> {
-        &self.sprites
+    pub fn get_sprites(&mut self) -> &mut Vec<Sprite<'a>> {
+        &mut self.sprites
     }
 }
