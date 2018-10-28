@@ -2,11 +2,13 @@ extern crate zip;
 
 use std::collections::HashMap;
 use std::io::{Read, Seek};
-use wfu::gfx::world::world_element::WorldElement;
+use wfu::gfx::world::element_definition::ElementDefinition;
 use wfu::io::decoder::{Decoder, DecoderCursor};
 
+pub type ElementId = i32;
+
 pub struct ElementLibrary {
-    pub elements: HashMap<i32, WorldElement>,
+    elements: HashMap<ElementId, ElementDefinition>,
 }
 
 impl ElementLibrary {
@@ -16,14 +18,19 @@ impl ElementLibrary {
         let library = DecoderCursor::new(entry).decode();
         return library;
     }
+
+    pub fn get(&self, id: ElementId) -> Option<&ElementDefinition> {
+        self.elements.get(&id)
+    }
 }
 
 impl<R: Read> Decoder<R> for ElementLibrary {
     fn decode(cur: &mut DecoderCursor<R>) -> Self {
         let count: i32 = cur.decode();
-        let mut elements: HashMap<i32, WorldElement> = HashMap::with_capacity(count as usize);
+        let mut elements: HashMap<ElementId, ElementDefinition> =
+            HashMap::with_capacity(count as usize);
         for _ in 0..count {
-            let element: WorldElement = cur.decode();
+            let element: ElementDefinition = cur.decode();
             elements.insert(element.id, element);
         }
         ElementLibrary { elements }

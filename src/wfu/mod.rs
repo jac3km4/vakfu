@@ -2,13 +2,14 @@ pub mod gfx {
     pub mod camera;
     pub mod color_table;
     pub mod lod;
-    pub mod map;
-    pub mod render_element;
+    pub mod map_patch;
+    pub mod render_spec;
     pub mod texture_coords;
     pub mod world {
+        pub mod element_definition;
         pub mod library;
-        pub mod world_element;
     }
+    pub type TextureId = i32;
 }
 
 pub mod io {
@@ -20,6 +21,7 @@ pub mod util;
 
 pub mod vk {
     pub mod fragment_shader;
+    pub mod map_renderer;
     pub mod persistent;
     pub mod sprite;
     pub mod texture_pool;

@@ -16,13 +16,13 @@ impl ElementProperties {
     }
 }
 
-pub struct WorldElement {
+pub struct ElementDefinition {
     pub id: i32,
     pub origin_x: i16,
     pub origin_y: i16,
     pub img_width: i16,
     pub img_height: i16,
-    pub gfx_id: i32,
+    pub texture_id: i32,
     properties: ElementProperties,
     visual_height: u8,
     pub visibility_mask: u8,
@@ -33,7 +33,7 @@ pub struct WorldElement {
     ground_sound: u8,
 }
 
-impl<R: Read> Decoder<R> for WorldElement {
+impl<R: Read> Decoder<R> for ElementDefinition {
     fn decode(cur: &mut DecoderCursor<R>) -> Self {
         let id: i32 = cur.decode();
         let origin_x: i16 = cur.decode();
@@ -51,13 +51,13 @@ impl<R: Read> Decoder<R> for WorldElement {
         let texture_coords = TextureCoords::from(img_width, img_height, properties.is_flip());
         let ground_sound: u8 = cur.decode();
 
-        WorldElement {
+        ElementDefinition {
             id,
             origin_x,
             origin_y,
             img_width,
             img_height,
-            gfx_id,
+            texture_id: gfx_id,
             properties,
             visual_height,
             visibility_mask,

@@ -10,7 +10,6 @@ extern crate zip;
 use std::env;
 use std::fs::File;
 use std::sync::Arc;
-use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::framebuffer::Framebuffer;
 use vulkano::pipeline::blend::{AttachmentBlend, BlendFactor, BlendOp};
@@ -20,12 +19,10 @@ use vulkano::sampler::Sampler;
 use vulkano::sync::{now, GpuFuture};
 use vulkano_win::VkSurfaceBuild;
 use wfu::gfx::camera;
-use wfu::gfx::map::Map;
 use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::tgam::TgamLoader;
 use wfu::util::timer::Timer;
-use wfu::vk::persistent::PersistentDescriptorSet;
-use wfu::vk::sprite::indexes_at;
+use wfu::vk::map_renderer;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
 
@@ -95,13 +92,6 @@ fn main() {
         [(queue_family, 0.5)].iter().cloned(),
     ).expect("failed to create device");
     let queue = queues.next().unwrap();
-
-    let (mut map, imgs) = Map::load(
-        queue.clone(),
-        File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
-        &element_library,
-        &mut textures,
-    );
 
     let (mut swapchain, mut images) = {
         let caps = surface
@@ -179,12 +169,13 @@ fn main() {
             .unwrap(),
     );
 
-    let desc = Arc::new(
-        PersistentDescriptorSet::start(pipeline.clone(), 0)
-            .add_sampled_images(imgs, sampler)
-            .unwrap()
-            .build()
-            .unwrap(),
+    let mut renderer = map_renderer::initialize_renderer(
+        pipeline.clone(),
+        sampler,
+        queue.clone(),
+        File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
+        &element_library,
+        &mut textures,
     );
 
     let mut framebuffers: Option<Vec<Arc<Framebuffer<_, _>>>> = None;
@@ -207,14 +198,7 @@ fn main() {
 
     let mut camera = camera::with_ease_in_out_quad();
 
-    let all_indexes = (0..map.get_sprites().len() as u32)
-        .take(map.get_sprites().len())
-        .flat_map(|i| indexes_at(i))
-        .collect::<Vec<_>>();
-
     let mut focused = true;
-
-    let mut all_vertices: Vec<Vertex> = Vec::new();
 
     loop {
         let delta = timer.tick();
@@ -279,28 +263,10 @@ fn main() {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
 
-        let vertices = map
-            .get_sprites()
-            .iter_mut()
-            .flat_map(|sprite| {
-                sprite.update((timer.last_time * 1000f64) as u64);
-                &sprite.vertex
-            }).cloned();
+        renderer.update(timer.time_as_millis());
 
-        all_vertices.clear();
-        all_vertices.extend(vertices);
-
-        let (vertex_buffer, upload_vertex) = ImmutableBuffer::<[Vertex]>::from_iter(
-            all_vertices.iter().cloned(),
-            vulkano::buffer::BufferUsage::vertex_buffer(),
-            queue.clone(),
-        ).expect("failed to create buffer");
-
-        let (index_buffer, upload_index) = ImmutableBuffer::from_iter(
-            all_indexes.iter().cloned(),
-            vulkano::buffer::BufferUsage::index_buffer(),
-            queue.clone(),
-        ).expect("failed to create buffer");
+        let (vertex_buffer, upload_vertex) = renderer.get_vertex_buffer(queue.clone());
+        let (index_buffer, upload_index) = renderer.get_index_buffer(queue.clone());
 
         let commands =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
@@ -315,7 +281,7 @@ fn main() {
                     &dynamic_state,
                     vertex_buffer.clone(),
                     index_buffer.clone(),
-                    desc.clone(),
+                    renderer.get_descriptors(),
                     matrix,
                 ).unwrap()
                 .end_render_pass()

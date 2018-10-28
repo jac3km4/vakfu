@@ -1,12 +1,13 @@
 extern crate vulkano;
 
-use wfu::gfx::render_element::RenderElement;
-use wfu::gfx::world::world_element::WorldElement;
+use wfu::gfx::render_spec::RenderSpec;
+use wfu::gfx::world::element_definition::ElementDefinition;
+use wfu::vk::texture_pool::TextureIndex;
 use wfu::vk::vertex::Vertex;
 
 pub struct Sprite<'a> {
     pub vertex: Vec<Vertex>,
-    element: &'a WorldElement,
+    element: &'a ElementDefinition,
 }
 
 impl<'a> Sprite<'a> {
@@ -23,7 +24,11 @@ impl<'a> Sprite<'a> {
         }
     }
 
-    pub fn new(spec: &RenderElement, element: &'a WorldElement, tex_id: u32) -> Sprite<'a> {
+    pub fn new(
+        spec: &RenderSpec,
+        element: &'a ElementDefinition,
+        tex_id: TextureIndex,
+    ) -> Sprite<'a> {
         let coords = element
             .frames
             .clone()
