@@ -27,17 +27,14 @@ use wfu::vk::texture_pool::TexturePool;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::vk_texture::VkTexture;
 
-pub struct MapRenderer<'a, D>
-where
-    D: DescriptorSetsCollection,
-{
+pub struct MapBatchRenderer<'a, D: DescriptorSetsCollection> {
     sprites: Vec<Sprite<'a>>,
     descriptors: Arc<D>,
     index_buffer: Vec<u32>,
     vertex_buffer: Vec<Vertex>,
 }
 
-impl<'a, D: DescriptorSetsCollection> MapRenderer<'a, D> {
+impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
     pub fn update(&mut self, time: u64) {
         let vertices = self
             .sprites
@@ -78,28 +75,28 @@ impl<'a, D: DescriptorSetsCollection> MapRenderer<'a, D> {
     }
 }
 
-pub fn initialize_renderer<'a, T, R, S, L>(
+pub fn initialize_batch_renderer<'a, T, R, S, L>(
     layout: Arc<L>,
     sampler: Arc<Sampler>,
     queue: Arc<Queue>,
-    reader: S,
-    library: &'a ElementLibrary,
-    loader: &mut R,
-) -> MapRenderer<'a, impl DescriptorSet>
+    map_archive: S,
+    element_library: &'a ElementLibrary,
+    texture_loader: &mut R,
+) -> MapBatchRenderer<'a, impl DescriptorSet>
 where
     T: VkTexture + 'static,
     R: Indexed<i32, T> + 'static,
     S: Read + Seek + 'static,
     L: PipelineLayoutAbstract + Sync + Send + 'static,
 {
-    let elements = load_all_elements(reader, library);
+    let elements = load_all_elements(map_archive, element_library);
 
     let working_set: HashSet<TextureId> = elements
         .iter()
         .map(|(_, element)| element.texture_id)
         .collect();
 
-    let (pool, images) = TexturePool::load(loader, working_set, queue.clone());
+    let (pool, images) = TexturePool::load(texture_loader, working_set, queue.clone());
 
     let sprites = elements
         .iter()
@@ -120,7 +117,7 @@ where
 
     let vertex_buffer: Vec<Vertex> = Vec::new();
 
-    MapRenderer {
+    MapBatchRenderer {
         sprites,
         descriptors: Arc::new(descriptors),
         index_buffer,

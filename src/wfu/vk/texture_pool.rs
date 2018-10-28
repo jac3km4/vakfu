@@ -5,7 +5,7 @@ use std::iter::*;
 use std::sync::Arc;
 use vulkano::device::Queue;
 use vulkano::format::R8G8B8A8Unorm;
-use vulkano::image::ImmutableImage;
+use vulkano::image::{Dimensions, ImmutableImage};
 use vulkano::sync::GpuFuture;
 use wfu::gfx::TextureId;
 use wfu::util::indexed::Indexed;
@@ -21,7 +21,7 @@ const TEXTURE_LIMIT: usize = 2560;
 
 impl TexturePool {
     pub fn load<R, T>(
-        loader: &mut R,
+        texture_loader: &mut R,
         working_set: HashSet<TextureId>,
         queue: Arc<Queue>,
     ) -> (TexturePool, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>)
@@ -31,7 +31,7 @@ impl TexturePool {
     {
         let default = load_empty_image(queue.clone());
 
-        let tmp = load_working_set(loader, working_set, queue);
+        let tmp = load_working_set(texture_loader, working_set, queue);
 
         let indices = tmp
             .iter()
@@ -57,7 +57,7 @@ impl TexturePool {
 fn load_empty_image(queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Unorm>> {
     let (image, cmd) = {
         let empty: Vec<u8> = vec![0, 0, 0, 0];
-        let dimensions = vulkano::image::Dimensions::Dim2d {
+        let dimensions = Dimensions::Dim2d {
             width: 1,
             height: 1,
         };
@@ -74,17 +74,17 @@ fn load_empty_image(queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Unorm>> {
 }
 
 fn load_working_set<R, T>(
-    loader: &mut R,
+    texture_loader: &mut R,
     working_set: HashSet<TextureId>,
     queue: Arc<Queue>,
-) -> Vec<(i32, Arc<ImmutableImage<R8G8B8A8Unorm>>)>
+) -> Vec<(TextureId, Arc<ImmutableImage<R8G8B8A8Unorm>>)>
 where
     R: Indexed<TextureId, T>,
     T: VkTexture,
 {
     working_set
         .iter()
-        .filter_map(|e| loader.at(*e).map(|tex| (*e, tex)))
+        .filter_map(|e| texture_loader.at(*e).map(|tex| (*e, tex)))
         .map(|(e, texture)| {
             let (image, cmd) = texture.load(queue.clone());
 
