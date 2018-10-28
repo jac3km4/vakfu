@@ -13,6 +13,7 @@ use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::device::Queue;
 use vulkano::sampler::Sampler;
 use vulkano::sync::GpuFuture;
+use wfu::gfx::lod::LevelOfDetail;
 use wfu::gfx::map_patch::{parse_patch, MapPatch};
 use wfu::gfx::render_spec::RenderSpec;
 use wfu::gfx::world::element_definition::ElementDefinition;
@@ -32,13 +33,21 @@ pub struct MapBatchRenderer<'a, D: DescriptorSetsCollection> {
     descriptors: Arc<D>,
     index_buffer: Vec<u32>,
     vertex_buffer: Vec<Vertex>,
+    lod: LevelOfDetail,
 }
 
 impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
+    pub fn set_lod(&mut self, lod: LevelOfDetail) {
+        self.lod = lod;
+    }
+
     pub fn update(&mut self, time: u64) {
+        let lod = self.lod;
+
         let vertices = self
             .sprites
             .iter_mut()
+            .filter(|s| s.is_visible(lod.get_mask()))
             .flat_map(|sprite| {
                 sprite.update(time);
                 &sprite.vertex
@@ -52,8 +61,10 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
         &self,
         queue: Arc<Queue>,
     ) -> (Arc<ImmutableBuffer<[u32]>>, impl GpuFuture) {
+        // there's 6 indexes per 4 vertices
+        let index_count = self.vertex_buffer.len() * 6 / 4;
         ImmutableBuffer::from_iter(
-            self.index_buffer.iter().cloned(),
+            self.index_buffer.iter().take(index_count).cloned(),
             vulkano::buffer::BufferUsage::index_buffer(),
             queue.clone(),
         ).expect("failed to create buffer")
@@ -122,6 +133,7 @@ where
         descriptors: Arc::new(descriptors),
         index_buffer,
         vertex_buffer,
+        lod: LevelOfDetail::High,
     }
 }
 

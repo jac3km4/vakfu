@@ -11,6 +11,10 @@ pub struct Sprite<'a> {
 }
 
 impl<'a> Sprite<'a> {
+    pub fn is_visible(&self, mask: u8) -> bool {
+        self.element.visibility_mask & mask == self.element.visibility_mask
+    }
+
     pub fn update(&mut self, time: u64) {
         match &self.element.frames {
             Some(frames) => {
