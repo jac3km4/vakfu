@@ -2,10 +2,8 @@
 extern crate vulkano;
 #[macro_use]
 extern crate vulkano_shader_derive;
-extern crate time;
 extern crate vulkano_win;
 extern crate winit;
-extern crate zip;
 
 use std::env;
 use std::fs::File;
@@ -22,7 +20,7 @@ use wfu::gfx::camera;
 use wfu::gfx::world::library::ElementLibrary;
 use wfu::io::tgam::TgamLoader;
 use wfu::util::timer::Timer;
-use wfu::vk::map_renderer;
+use wfu::vk::map_batch_renderer;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
 
@@ -169,7 +167,7 @@ fn main() {
             .unwrap(),
     );
 
-    let mut renderer = map_renderer::initialize_renderer(
+    let mut renderer = map_batch_renderer::initialize_batch_renderer(
         pipeline.clone(),
         sampler,
         queue.clone(),

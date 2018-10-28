@@ -21,7 +21,7 @@ pub mod util;
 
 pub mod vk {
     pub mod fragment_shader;
-    pub mod map_renderer;
+    pub mod map_batch_renderer;
     pub mod persistent;
     pub mod sprite;
     pub mod texture_pool;
