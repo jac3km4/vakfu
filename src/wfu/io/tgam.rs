@@ -64,7 +64,7 @@ impl<R: Read + Seek> Indexed<i32, TgamTexture> for TgamLoader<R> {
         use self::zip::result::ZipError;
         use wfu::io::decoder::DecoderCursor;
 
-        match self.archive.by_name(format!("gfx/{}.tgam", id).as_ref()) {
+        match self.archive.by_name(&format!("gfx/{}.tgam", id)) {
             Err(ZipError::FileNotFound) => None,
             Ok(entry) => Some(DecoderCursor::new(entry).decode()),
             _ => panic!("Unknown zip file format"),

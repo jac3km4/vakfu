@@ -7,65 +7,88 @@ use vulkano::device::Queue;
 use vulkano::format::R8G8B8A8Unorm;
 use vulkano::image::ImmutableImage;
 use vulkano::sync::GpuFuture;
+use wfu::gfx::TextureId;
 use wfu::util::indexed::Indexed;
 use wfu::vk::vk_texture::VkTexture;
 
+pub type TextureIndex = u32;
+
 pub struct TexturePool {
-    pub indices: HashMap<i32, u32>,
+    indices: HashMap<TextureId, TextureIndex>,
 }
 
+const TEXTURE_LIMIT: usize = 2560;
+
 impl TexturePool {
-    pub fn new<R: Indexed<i32, T>, T: VkTexture>(
+    pub fn load<R, T>(
         loader: &mut R,
-        working_set: HashSet<i32>,
+        working_set: HashSet<TextureId>,
         queue: Arc<Queue>,
-    ) -> (TexturePool, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>) {
-        let (default, cmd) = {
-            let empty: Vec<u8> = vec![0, 0, 0, 0];
-            vulkano::image::immutable::ImmutableImage::from_iter(
-                empty.iter().cloned(),
-                vulkano::image::Dimensions::Dim2d {
-                    width: 1,
-                    height: 1,
-                },
-                vulkano::format::R8G8B8A8Unorm,
-                queue.clone(),
-            ).unwrap()
-        };
+    ) -> (TexturePool, Vec<Arc<ImmutableImage<R8G8B8A8Unorm>>>)
+    where
+        R: Indexed<TextureId, T>,
+        T: VkTexture,
+    {
+        let default = load_empty_image(queue.clone());
 
-        cmd.flush().unwrap();
-
-        let tmp = working_set
-            .iter()
-            .filter_map(|e| {
-                loader
-                    .at(*e)
-                    .map(|texture| (e, initialize_texture(texture, queue.clone())))
-            }).collect::<Vec<_>>();
+        let tmp = load_working_set(loader, working_set, queue);
 
         let indices = tmp
             .iter()
             .enumerate()
-            .map(|(i, (tex_id, _))| (**tex_id, i as u32))
-            .collect::<HashMap<i32, u32>>();
+            .map(|(i, (tex_id, _))| (*tex_id, i as TextureIndex))
+            .collect::<HashMap<_, _>>();
 
         let images = tmp
             .iter()
             .map(|(_, t)| t.clone())
             .chain(repeat(default))
-            .take(2560)
+            .take(TEXTURE_LIMIT)
             .collect::<Vec<_>>();
 
         (TexturePool { indices }, images)
     }
+
+    pub fn get_texture_indice(&self, texture_id: TextureId) -> Option<&TextureIndex> {
+        self.indices.get(&texture_id)
+    }
 }
 
-fn initialize_texture<T>(texture: T, queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Unorm>>
-where
-    T: VkTexture,
-{
-    let (image, cmd) = texture.load(queue);
+fn load_empty_image(queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Unorm>> {
+    let (image, cmd) = {
+        let empty: Vec<u8> = vec![0, 0, 0, 0];
+        let dimensions = vulkano::image::Dimensions::Dim2d {
+            width: 1,
+            height: 1,
+        };
+        ImmutableImage::from_iter(
+            empty.iter().cloned(),
+            dimensions,
+            R8G8B8A8Unorm,
+            queue.clone(),
+        ).unwrap()
+    };
 
     cmd.flush().unwrap();
     return image;
+}
+
+fn load_working_set<R, T>(
+    loader: &mut R,
+    working_set: HashSet<TextureId>,
+    queue: Arc<Queue>,
+) -> Vec<(i32, Arc<ImmutableImage<R8G8B8A8Unorm>>)>
+where
+    R: Indexed<TextureId, T>,
+    T: VkTexture,
+{
+    working_set
+        .iter()
+        .filter_map(|e| loader.at(*e).map(|tex| (*e, tex)))
+        .map(|(e, texture)| {
+            let (image, cmd) = texture.load(queue.clone());
+
+            cmd.flush().unwrap();
+            (e, image)
+        }).collect::<Vec<_>>()
 }

@@ -2,7 +2,7 @@ extern crate time;
 
 pub struct Timer {
     last_time_to_s: f64,
-    pub last_time: f64,
+    last_time: f64,
     nb_frames: i32,
 }
 
@@ -13,6 +13,10 @@ impl Timer {
             last_time: 0f64,
             nb_frames: 0,
         }
+    }
+
+    pub fn time_as_millis(&self) -> u64 {
+        (self.last_time * 1000f64) as u64
     }
 
     pub fn tick(&mut self) -> f64 {

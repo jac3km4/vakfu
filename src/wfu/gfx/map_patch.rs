@@ -1,36 +1,23 @@
 extern crate zip;
 
-use std::io::{Read, Seek};
+use std::io::Read;
 use wfu::gfx::color_table::ColorTable;
-use wfu::gfx::world::world_element::WorldElement;
+use wfu::gfx::render_spec::DisplaySpec;
+use wfu::gfx::render_spec::RenderSpec;
 use wfu::io::decoder::{Decoder, DecoderCursor};
-use wfu::util::{iso_to_screen_x, iso_to_screen_y};
 
-pub struct RenderElementPatch {
+pub struct MapPatch {
     min_x: i32,
     min_y: i32,
     min_z: i16,
     max_x: i32,
     max_y: i32,
     max_z: i16,
-    pub elements: Vec<RenderElement>,
-}
-
-impl RenderElementPatch {
-    pub fn load<R: Seek + Read>(
-        archive: &mut zip::ZipArchive<R>,
-        x: i32,
-        y: i32,
-    ) -> Option<RenderElementPatch> {
-        match archive.by_name(format!("{}_{}", x, y).as_ref()) {
-            Ok(entry) => Some(DecoderCursor::new(entry).decode::<RenderElementPatch>()),
-            _ => None,
-        }
-    }
+    pub elements: Vec<RenderSpec>,
 }
 
 pub fn parse_patch(name: &str) -> Option<(i32, i32)> {
-    match name.split('_').collect::<Vec<&str>>().as_slice() {
+    match name.split('_').collect::<Vec<&str>>()[..] {
         [a, b] => i32::from_str_radix(a, 10)
             .ok()
             .and_then(|x| i32::from_str_radix(b, 10).ok().map(|y| (x, y))),
@@ -38,7 +25,7 @@ pub fn parse_patch(name: &str) -> Option<(i32, i32)> {
     }
 }
 
-impl<R: Read> Decoder<R> for RenderElementPatch {
+impl<R: Read> Decoder<R> for MapPatch {
     fn decode(cur: &mut DecoderCursor<R>) -> Self {
         let min_x: i32 = cur.decode();
         let min_y: i32 = cur.decode();
@@ -60,7 +47,7 @@ impl<R: Read> Decoder<R> for RenderElementPatch {
         let map_x: i32 = cur.decode();
         let map_y: i32 = cur.decode();
         let rects: u16 = cur.decode();
-        let mut elements: Vec<RenderElement> = Vec::with_capacity((rects * 2) as usize);
+        let mut elements: Vec<RenderSpec> = Vec::with_capacity((rects * 2) as usize);
 
         for _ in 0..rects {
             let rect_min_x = map_x + cur.decode::<u8>() as i32;
@@ -72,14 +59,14 @@ impl<R: Read> Decoder<R> for RenderElementPatch {
                 for cell_y in rect_min_y..rect_max_y {
                     let count: u8 = cur.decode();
                     for _ in 0..count {
-                        let display: DisplayElement = cur.decode();
+                        let display: DisplaySpec = cur.decode();
                         let group_idx = cur.decode::<u16>() as usize;
                         let group_key = group_keys[group_idx];
                         let layer_idx = layer_indexes[group_idx];
                         let group_id = group_ids[group_idx];
                         let color_idx: u16 = cur.decode();
                         let element_colors = colors[color_idx as usize].to_owned();
-                        let element = RenderElement {
+                        let element = RenderSpec {
                             display,
                             cell_x,
                             cell_y,
@@ -94,7 +81,7 @@ impl<R: Read> Decoder<R> for RenderElementPatch {
                 }
             }
         }
-        RenderElementPatch {
+        MapPatch {
             min_x,
             min_y,
             min_z,
@@ -102,68 +89,6 @@ impl<R: Read> Decoder<R> for RenderElementPatch {
             max_y,
             max_z,
             elements,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct RenderElement {
-    pub display: DisplayElement,
-    pub cell_x: i32,
-    pub cell_y: i32,
-    group_key: i32,
-    layer_idx: u8,
-    group_id: i32,
-    pub colors: Vec<f32>,
-    pub z: i32,
-}
-
-impl RenderElement {
-    pub fn get_x(&self, world_element: &WorldElement) -> f32 {
-        iso_to_screen_x(self.cell_x, self.cell_y) - world_element.origin_x as f32
-    }
-
-    pub fn get_y(&self, world_element: &WorldElement) -> f32 {
-        iso_to_screen_y(
-            self.cell_x,
-            self.cell_y,
-            (self.display.cell_z - self.display.height as i16) as i32,
-        ) + world_element.origin_y as f32
-    }
-
-    pub fn hashcode(&self) -> i64 {
-        (self.cell_y as i64 + 8192i64 & 0x3FFFi64) << 34i64
-            | (self.cell_x as i64 + 8192i64 & 0x3FFFi64) << 19i64
-            | (self.display.altitude_order as i64 & 0x1FFFi64) << 6i64
-    }
-}
-
-#[derive(Clone)]
-pub struct DisplayElement {
-    cell_z: i16,
-    height: u8,
-    altitude_order: u8,
-    occluder: bool,
-    tpe: u8,
-    pub element_id: i32,
-}
-
-impl<R: Read> Decoder<R> for DisplayElement {
-    fn decode(cur: &mut DecoderCursor<R>) -> Self {
-        let cell_z: i16 = cur.decode();
-        let height: u8 = cur.decode();
-        let altitude_order: u8 = cur.decode();
-        let byte: u8 = cur.decode();
-        let occluder = byte & 0b0000_0001 == 0b0000_0001;
-        let tpe = (byte & 0b0000_1110) >> 1;
-        let element_id: i32 = cur.decode();
-        DisplayElement {
-            cell_z,
-            height,
-            altitude_order,
-            occluder,
-            tpe,
-            element_id,
         }
     }
 }
