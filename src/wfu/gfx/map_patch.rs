@@ -7,12 +7,12 @@ use wfu::gfx::render_spec::RenderSpec;
 use wfu::io::decoder::{Decoder, DecoderCursor};
 
 pub struct MapPatch {
-    min_x: i32,
-    min_y: i32,
-    min_z: i16,
-    max_x: i32,
-    max_y: i32,
-    max_z: i16,
+    pub min_x: i32,
+    pub min_y: i32,
+    pub min_z: i16,
+    pub max_x: i32,
+    pub max_y: i32,
+    pub max_z: i16,
     pub elements: Vec<RenderSpec>,
 }
 
@@ -74,7 +74,6 @@ impl<R: Read> Decoder<R> for MapPatch {
                             layer_idx,
                             group_id,
                             colors: element_colors,
-                            z: 0,
                         };
                         elements.push(element);
                     }

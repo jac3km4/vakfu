@@ -167,7 +167,7 @@ fn main() {
             .unwrap(),
     );
 
-    let mut renderer = map_batch_renderer::initialize_batch_renderer(
+    let mut renderer = map_batch_renderer::new_batch_renderer(
         pipeline.clone(),
         sampler,
         queue.clone(),
@@ -261,7 +261,10 @@ fn main() {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
 
-        renderer.update(timer.time_as_millis());
+        renderer.update(
+            timer.time_as_millis(),
+            camera.get_bounds(dimensions[0], dimensions[1]),
+        );
 
         let (vertex_buffer, upload_vertex) = renderer.get_vertex_buffer(queue.clone());
         let (index_buffer, upload_index) = renderer.get_index_buffer(queue.clone());
