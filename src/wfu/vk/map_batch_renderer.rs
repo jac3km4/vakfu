@@ -170,8 +170,8 @@ impl<'a> SpriteSpec<'a> {
                 y: iso_to_screen_x(self.patch.max_x, self.patch.max_y),
             },
             y: Vector2 {
-                x: iso_to_screen_y(self.patch.min_x, self.patch.min_y, 0),
-                y: iso_to_screen_y(self.patch.max_x, self.patch.max_y, 0),
+                x: iso_to_screen_y(self.patch.min_x, self.patch.min_y, self.patch.min_z as i32),
+                y: iso_to_screen_y(self.patch.max_x, self.patch.max_y, self.patch.max_z as i32),
             },
         };
         BoundedSprite { sprite, bounds }
