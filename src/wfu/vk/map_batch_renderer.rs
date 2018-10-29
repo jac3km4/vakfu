@@ -1,10 +1,13 @@
+extern crate cgmath;
 extern crate itertools;
 extern crate vulkano;
 extern crate zip;
 
+use self::cgmath::{Matrix2, Vector2};
 use self::itertools::*;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
+use std::rc::Rc;
 use std::sync::Arc;
 use vulkano::buffer::ImmutableBuffer;
 use vulkano::descriptor::descriptor_set::DescriptorSet;
@@ -21,15 +24,16 @@ use wfu::gfx::world::library::ElementLibrary;
 use wfu::gfx::TextureId;
 use wfu::io::decoder::DecoderCursor;
 use wfu::util::indexed::Indexed;
+use wfu::util::*;
 use wfu::vk::persistent::PersistentDescriptorSet;
 use wfu::vk::sprite::indexes_at;
 use wfu::vk::sprite::Sprite;
-use wfu::vk::texture_pool::TexturePool;
+use wfu::vk::texture_pool::{TextureIndex, TexturePool};
 use wfu::vk::vertex::Vertex;
 use wfu::vk::vk_texture::VkTexture;
 
 pub struct MapBatchRenderer<'a, D: DescriptorSetsCollection> {
-    sprites: Vec<Sprite<'a>>,
+    sprites: Vec<BoundedSprite<'a>>,
     descriptors: Arc<D>,
     index_buffer: Vec<u32>,
     vertex_buffer: Vec<Vertex>,
@@ -41,16 +45,16 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
         self.lod = lod;
     }
 
-    pub fn update(&mut self, time: u64) {
+    pub fn update(&mut self, time: u64, bounds: Matrix2<f32>) {
         let lod = self.lod;
 
         let vertices = self
             .sprites
             .iter_mut()
-            .filter(|s| s.is_visible(lod.get_mask()))
-            .flat_map(|sprite| {
-                sprite.update(time);
-                &sprite.vertex
+            .filter(|s| s.sprite.is_visible(lod.get_mask()) && s.intersects(bounds))
+            .flat_map(|bounded| {
+                bounded.sprite.update(time);
+                &bounded.sprite.vertex
             }).cloned();
 
         self.vertex_buffer.clear();
@@ -86,7 +90,7 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
     }
 }
 
-pub fn initialize_batch_renderer<'a, T, R, S, L>(
+pub fn new_batch_renderer<'a, T, R, S, L>(
     layout: Arc<L>,
     sampler: Arc<Sampler>,
     queue: Arc<Queue>,
@@ -100,20 +104,20 @@ where
     S: Read + Seek + 'static,
     L: PipelineLayoutAbstract + Sync + Send + 'static,
 {
-    let elements = load_all_elements(map_archive, element_library);
+    let elements = load_sprites(map_archive, element_library);
 
     let working_set: HashSet<TextureId> = elements
         .iter()
-        .map(|(_, element)| element.texture_id)
+        .map(|spec| spec.definition.texture_id)
         .collect();
 
     let (pool, images) = TexturePool::load(texture_loader, working_set, queue.clone());
 
     let sprites = elements
         .iter()
-        .filter_map(|(spec, element)| {
-            pool.get_texture_indice(element.texture_id)
-                .map(|desc| Sprite::new(&spec, element, *desc))
+        .filter_map(|spec| {
+            pool.get_texture_indice(spec.definition.texture_id)
+                .map(|desc| spec.create_sprite(*desc))
         }).collect::<Vec<_>>();
 
     let descriptors = PersistentDescriptorSet::start(layout, 0)
@@ -137,20 +141,63 @@ where
     }
 }
 
-fn load_all_elements<S: Read + Seek>(
-    reader: S,
-    library: &ElementLibrary,
-) -> Vec<(RenderSpec, &ElementDefinition)> {
-    let mut archive = zip::ZipArchive::new(reader).unwrap();
+pub struct BoundedSprite<'a> {
+    bounds: Matrix2<f32>,
+    sprite: Sprite<'a>,
+}
+
+impl<'a> BoundedSprite<'a> {
+    pub fn intersects(&self, other: Matrix2<f32>) -> bool {
+        !(self.bounds.x[0] > other.x[1]
+            || self.bounds.x[1] < other.x[0]
+            || self.bounds.y[0] > other.y[1]
+            || self.bounds.y[1] < other.y[0])
+    }
+}
+
+struct SpriteSpec<'a> {
+    render: RenderSpec,
+    definition: &'a ElementDefinition,
+    patch: Rc<MapPatch>,
+}
+
+impl<'a> SpriteSpec<'a> {
+    pub fn create_sprite(&self, tex_idx: TextureIndex) -> BoundedSprite<'a> {
+        let sprite = Sprite::new(&self.render, self.definition, tex_idx);
+        let bounds = Matrix2 {
+            x: Vector2 {
+                x: iso_to_screen_x(self.patch.min_x, self.patch.min_y),
+                y: iso_to_screen_x(self.patch.max_x, self.patch.max_y),
+            },
+            y: Vector2 {
+                x: iso_to_screen_y(self.patch.min_x, self.patch.min_y, 0),
+                y: iso_to_screen_y(self.patch.max_x, self.patch.max_y, 0),
+            },
+        };
+        BoundedSprite { sprite, bounds }
+    }
+}
+
+fn load_sprites<S: Read + Seek>(map_archive: S, library: &ElementLibrary) -> Vec<SpriteSpec> {
+    let mut archive = zip::ZipArchive::new(map_archive).unwrap();
 
     (0..archive.len())
         .filter_map(|i| {
             let entry = archive.by_index(i).unwrap();
-            parse_patch(entry.name()).map(|_| DecoderCursor::new(entry).decode::<MapPatch>())
-        }).flat_map(|patch| patch.elements)
-        .filter_map(|spec| {
-            library
-                .get(spec.display.element_id)
-                .map(|element| (spec, element))
-        }).sorted_by_key(|(spec, _)| spec.hashcode())
+            parse_patch(entry.name())
+                .map(|_| Rc::new(DecoderCursor::new(entry).decode::<MapPatch>()))
+        }).flat_map(|patch| {
+            patch
+                .elements
+                .iter()
+                .filter_map(|spec| {
+                    library
+                        .get(spec.display.element_id)
+                        .map(|element| SpriteSpec {
+                            render: spec.clone(),
+                            definition: element,
+                            patch: patch.clone(),
+                        })
+                }).collect::<Vec<_>>()
+        }).sorted_by_key(|spec| spec.render.hashcode())
 }

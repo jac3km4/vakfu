@@ -20,16 +20,12 @@ struct CamCtrl {
     right: bool,
 }
 
-const DEFAULT_WIDTH: f32 = 1024f32;
-const DEFAULT_HEIGHT: f32 = 768f32;
-
-const SCREEN_WIDTH_RATIO: f32 = 9.765625E-4f32;
-const SCREEN_HEIGHT_RATIO: f32 = 0.0017361111f32;
-
 const ACCELERATION_FACTOR: f32 = 12_800f32;
 
 const MOVEMENT_SPEED: f32 = 0.4f32;
 const ZOOM_SPEED: f32 = 0.8f32;
+
+const BOUND_LEEWAY: f32 = 1024f32;
 
 pub fn with_ease_in_out_quad() -> Camera<impl Fn(f32) -> f32> {
     Camera::new(|t| {
@@ -65,16 +61,22 @@ impl<F: Fn(f32) -> f32> Camera<F> {
             * Matrix4::from_translation(self.translation.extend(0f32))
     }
 
-    pub fn get_abs_center(&self) -> Vector2<f32> {
+    pub fn get_bounds(&self, screen_w: u32, screen_h: u32) -> Matrix2<f32> {
         let translation_x = -self.translation.x;
         let translation_y = self.translation.y;
 
-        let resolution_factor = DEFAULT_WIDTH.max(DEFAULT_HEIGHT);
+        let half_w = (screen_w as f32 / self.zoom_factor) + BOUND_LEEWAY;
+        let half_h = (screen_h as f32 / self.zoom_factor) + BOUND_LEEWAY;
 
-        let x = translation_x * resolution_factor * SCREEN_WIDTH_RATIO;
-        let y = translation_y * resolution_factor * SCREEN_HEIGHT_RATIO;
+        let left = translation_x - half_w;
+        let top = translation_y - half_h;
+        let right = left + 2f32 * half_w;
+        let bottom = top + 2f32 * half_h;
 
-        Vector2 { x, y }
+        Matrix2 {
+            x: Vector2 { x: left, y: right },
+            y: Vector2 { x: top, y: bottom },
+        }
     }
 
     pub fn update(&mut self, delta: f64) {

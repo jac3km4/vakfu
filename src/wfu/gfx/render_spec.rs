@@ -12,7 +12,6 @@ pub struct RenderSpec {
     pub layer_idx: u8,
     pub group_id: i32,
     pub colors: Vec<f32>,
-    pub z: i32,
 }
 
 impl RenderSpec {
