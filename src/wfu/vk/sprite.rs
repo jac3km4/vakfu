@@ -72,27 +72,16 @@ impl<'a> Sprite<'a> {
         let mapy = (spec.cell_y as f32 / 18f32).floor() as i32;
         let key = mapx << 16 | (mapy & 0xFFFF) ;
 
-        let no_light = 
-        LightDef {
-            allowOutdoorLighting: false,
-            ambianceLight: vec![1f32, 1f32, 1f32],
-            shadows: vec![1f32, 1f32, 1f32],
-            lights: vec![1f32, 1f32, 1f32],
-            hasShadows: false,
-            merged: vec![1f32],
-            nightLight: vec![0f32, 0f32, 0f32],
-        };
-
-        let no_cell =
-        LightCell {
-            cellX: mapx,
-            cellY: mapy,
-            layerColors: vec![no_light]
-        };
+        let no_cell = lights.get_noCell(mapx,mapy);
+        let no_light = no_cell.get_noLight();
 
         let cell = lights.lightmaps.get(&key).unwrap_or(&no_cell);
         let hash = (spec.cell_x - cell.cellX) + ((spec.cell_y - cell.cellY) + (spec.layer_idx as i32 * 18)) * 18;
-        let def =  &cell.layerColors[hash as usize];
+        let def = &cell.layerColors
+                    .as_ref()
+                    .unwrap()
+                    .get(&hash)
+                    .unwrap_or(&no_light);
 
         let colorOrg = if spec.colors.len() == 3 {
             [spec.colors[0], spec.colors[1], spec.colors[2]]

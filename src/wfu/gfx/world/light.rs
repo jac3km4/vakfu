@@ -19,11 +19,35 @@ pub struct LightDef {
 pub struct LightCell {
     pub cellX: i32,
     pub cellY: i32,
-    pub layerColors: Vec<LightDef>,
+    pub layerColors: Option<HashMap<i32, LightDef>>,
+}
+
+impl LightCell {
+    pub fn get_noLight(&self) -> LightDef {
+        return LightDef {
+            allowOutdoorLighting: false,
+            ambianceLight: vec![1f32, 1f32, 1f32],
+            shadows: vec![1f32, 1f32, 1f32],
+            lights: vec![1f32, 1f32, 1f32],
+            hasShadows: false,
+            merged: vec![1f32],
+            nightLight: vec![0f32, 0f32, 0f32],
+        };
+    }
 }
 
 pub struct LightMap {
     pub lightmaps: HashMap<i32, LightCell>,
+}
+
+impl LightMap {
+    pub fn get_noCell(&self, mapx:i32, mapy:i32) -> LightCell {
+        return LightCell {
+            cellX: mapx,
+            cellY: mapy,
+            layerColors: None
+        };
+    }
 }
 
 impl<R: Read> Decoder<R> for LightCell {
@@ -73,33 +97,32 @@ impl<R: Read> Decoder<R> for LightCell {
 
         let layerCount :i16 = cur.decode();
         let lcount :i16 = cur.decode();
-        let mut layerColor :Vec<LightDef> = Vec::with_capacity((layerCount * numCells) as usize);
-        
-        let blank = vec![1f32, 1f32, 1f32];
-        for _ in 0.. layerCount * numCells
-        {
-            layerColor.push( LightDef {
-                    allowOutdoorLighting: false,
-                    ambianceLight: blank.clone(),
-                    shadows: blank.clone(),
-                    lights: blank.clone(),
-                    hasShadows: false,
-                    merged: vec![1f32],
-                    nightLight: vec![0f32, 0f32, 0f32],
-                }
-            )
-        }
+        let mut layerColor = HashMap::new();
          
         for _ in 0..lcount {
             let k: u16 = cur.decode();
             let idx: u16 = cur.decode();
-            layerColor[k as usize] = layer[idx as usize].clone();
+
+            if idx < layer.len() as u16 {
+                layerColor.insert(k as i32, layer[idx as usize].clone())
+            } else {
+                layerColor.insert(k as i32, 
+                    LightDef {
+                        allowOutdoorLighting: false,
+                        ambianceLight: vec![1f32, 1f32, 1f32],
+                        shadows: vec![1f32, 1f32, 1f32],
+                        lights: vec![1f32, 1f32, 1f32],
+                        hasShadows: false,
+                        merged: vec![1f32],
+                        nightLight: vec![0f32, 0f32, 0f32],
+                    })
+            };
         }
 
         LightCell {
             cellX: x as i32 * 18,
             cellY: y as i32 * 18,
-            layerColors: layerColor,
+            layerColors: Some(layerColor),
         }
     }
 }
