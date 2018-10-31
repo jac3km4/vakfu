@@ -3,8 +3,6 @@ extern crate vulkano;
 use wfu::gfx::render_spec::RenderSpec;
 use wfu::gfx::world::element_definition::ElementDefinition;
 use wfu::gfx::world::light::LightMap;
-use wfu::gfx::world::light::LightCell;
-use wfu::gfx::world::light::LightDef;
 use wfu::vk::texture_pool::TextureIndex;
 use wfu::vk::vertex::Vertex;
 
@@ -70,7 +68,7 @@ impl<'a> Sprite<'a> {
 
         let mapx = (spec.cell_x as f32 / 18f32).floor() as i32;
         let mapy = (spec.cell_y as f32 / 18f32).floor() as i32;
-        let key = mapx << 16 | (mapy & 0xFFFF) ;
+        let key = mapx << 16 | (mapy & 0xFFFF);
 
         let no_cell = lights.get_noCell(mapx,mapy);
         let no_light = no_cell.get_noLight();
