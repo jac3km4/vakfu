@@ -43,8 +43,8 @@ const BLENDING: AttachmentBlend = AttachmentBlend {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let path = args.get(1).expect("Expecting path as 1st param");
-    let map_id = args.get(2).expect("Expecting map id as 2nd param");
+    let path = args.get(1).expect("Expecting path as 1st param").to_owned();
+    let map_id = args.get(2).expect("Expecting map id as 2nd param").to_owned();
 
     let mut textures = TgamLoader::new(File::open(format!("{}\\{}", path, "gfx.jar")).unwrap());
 
@@ -171,7 +171,8 @@ fn main() {
         pipeline.clone(),
         sampler,
         queue.clone(),
-        File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
+        path,
+        map_id,
         &element_library,
         &mut textures,
     );

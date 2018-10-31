@@ -6,8 +6,11 @@ extern crate zip;
 use self::cgmath::{Matrix2, Vector2};
 use self::itertools::*;
 use std::collections::HashSet;
+use std::collections::HashMap;
 use std::io::{Read, Seek};
+use std::fs::File;
 use std::rc::Rc;
+use std::fmt::Display;
 use std::sync::Arc;
 use vulkano::buffer::ImmutableBuffer;
 use vulkano::descriptor::descriptor_set::DescriptorSet;
@@ -21,6 +24,8 @@ use wfu::gfx::map_patch::{parse_patch, MapPatch};
 use wfu::gfx::render_spec::RenderSpec;
 use wfu::gfx::world::element_definition::ElementDefinition;
 use wfu::gfx::world::library::ElementLibrary;
+use wfu::gfx::world::light::LightCell;
+use wfu::gfx::world::light::LightMap;
 use wfu::gfx::TextureId;
 use wfu::io::decoder::DecoderCursor;
 use wfu::util::indexed::Indexed;
@@ -90,21 +95,27 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
     }
 }
 
-pub fn new_batch_renderer<'a, T, R, S, L>(
+pub fn new_batch_renderer<'a, T, R, S, P, L>(
     layout: Arc<L>,
     sampler: Arc<Sampler>,
     queue: Arc<Queue>,
-    map_archive: S,
+    path: S,
+    map_id: P,
     element_library: &'a ElementLibrary,
     texture_loader: &mut R,
 ) -> MapBatchRenderer<'a, impl DescriptorSet>
 where
     T: VkTexture + 'static,
     R: Indexed<i32, T> + 'static,
-    S: Read + Seek + 'static,
+    S: Display + 'static,
+    P: Display + 'static,
     L: PipelineLayoutAbstract + Sync + Send + 'static,
 {
+    let map_archive = File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap();
+    let light_archive = File::open(format!("{}\\light\\{}.jar", path, map_id)).unwrap();
+
     let elements = load_sprites(map_archive, element_library);
+    let lights = &load_light(light_archive);
 
     let working_set: HashSet<TextureId> = elements
         .iter()
@@ -117,7 +128,7 @@ where
         .iter()
         .filter_map(|spec| {
             pool.get_texture_indice(spec.definition.texture_id)
-                .map(|desc| spec.create_sprite(*desc))
+                .map(|desc| spec.create_sprite(*desc, lights))
         }).collect::<Vec<_>>();
 
     let descriptors = PersistentDescriptorSet::start(layout, 0)
@@ -162,8 +173,8 @@ struct SpriteSpec<'a> {
 }
 
 impl<'a> SpriteSpec<'a> {
-    pub fn create_sprite(&self, tex_idx: TextureIndex) -> BoundedSprite<'a> {
-        let sprite = Sprite::new(&self.render, self.definition, tex_idx);
+    pub fn create_sprite(&self, tex_idx: TextureIndex, light: &LightMap) -> BoundedSprite<'a> {
+        let sprite = Sprite::new(&self.render, self.definition, light, tex_idx);
         let bounds = Matrix2 {
             x: Vector2 {
                 x: iso_to_screen_x(self.patch.min_x, self.patch.min_y),
@@ -200,4 +211,24 @@ fn load_sprites<S: Read + Seek>(map_archive: S, library: &ElementLibrary) -> Vec
                         })
                 }).collect::<Vec<_>>()
         }).sorted_by_key(|spec| spec.render.hashcode())
+}
+
+fn load_light<S: Read + Seek>(reader: S) -> LightMap {
+    let mut archive = zip::ZipArchive::new(reader).unwrap(); 
+    let mut maps = LightMap { lightmaps: HashMap::new()};
+
+    for i in 0..archive.len()
+    {
+        let entry = archive.by_index(i).unwrap();
+        let patch = parse_patch(entry.name()).map(|_| DecoderCursor::new(entry).decode::<LightCell>());
+
+        for cell in patch
+        {   
+            let mapx = cell.cellX / 18;
+            let mapy = cell.cellY / 18;
+            let hash = mapx << 16 | (mapy & 0xFFFF);
+            maps.lightmaps.insert(hash ,cell);
+        }
+    }      
+    return maps;
 }
