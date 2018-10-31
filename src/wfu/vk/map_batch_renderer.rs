@@ -96,12 +96,13 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
     }
 }
 
-pub fn new_batch_renderer<'a, T, R, S, P, L>(
+pub fn new_batch_renderer<'a, T, R, S, P, O, L>(
     layout: Arc<L>,
     sampler: Arc<Sampler>,
     queue: Arc<Queue>,
     path: S,
     map_id: P,
+    options: O,
     element_library: &'a ElementLibrary,
     texture_loader: &mut R,
 ) -> MapBatchRenderer<'a, impl DescriptorSet>
@@ -110,13 +111,16 @@ where
     R: Indexed<i32, T> + 'static,
     S: Display + 'static,
     P: Display + 'static,
+    O: ToString + 'static,
     L: PipelineLayoutAbstract + Sync + Send + 'static,
 {
     let map_archive = File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap();
     let light_archive = File::open(format!("{}\\light\\{}.jar", path, map_id)).unwrap();
 
+    let lighton = if options.to_string() == "-nl" { false } else { true };
+
     let elements = load_sprites(map_archive, element_library);
-    let lights = &load_light(light_archive);
+    let lights = &load_light(light_archive, lighton);
 
     let working_set: HashSet<TextureId> = elements
         .iter()
@@ -214,7 +218,12 @@ fn load_sprites<S: Read + Seek>(map_archive: S, library: &ElementLibrary) -> Vec
         }).sorted_by_key(|spec| spec.render.hashcode())
 }
 
-fn load_light<S: Read + Seek>(reader: S) -> LightMap {
+fn load_light<S: Read + Seek>(reader: S, enable:bool) -> LightMap {
+    if !enable {
+        let mut nomaps = LightMap { lightmaps: HashMap::new()};
+        return nomaps;
+    }
+
     let mut archive = zip::ZipArchive::new(reader).unwrap(); 
     let mut maps = LightMap { lightmaps: HashMap::new()};
 

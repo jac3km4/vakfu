@@ -70,6 +70,7 @@ impl<'a> Sprite<'a> {
         let mapy = (spec.cell_y as f32 / 18f32).floor() as i32;
         let key = mapx << 16 | (mapy & 0xFFFF);
 
+        let no_map = lights.get_noMap();
         let no_cell = lights.get_noCell(mapx,mapy);
         let no_light = no_cell.get_noLight();
 
@@ -77,7 +78,7 @@ impl<'a> Sprite<'a> {
         let hash = (spec.cell_x - cell.cellX) + ((spec.cell_y - cell.cellY) + (spec.layer_idx as i32 * 18)) * 18;
         let def = &cell.layerColors
                     .as_ref()
-                    .unwrap()
+                    .unwrap_or(&no_map)
                     .get(&hash)
                     .unwrap_or(&no_light);
 

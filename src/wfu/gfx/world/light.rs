@@ -48,6 +48,10 @@ impl LightMap {
             layerColors: None
         };
     }
+
+     pub fn get_noMap(&self) -> HashMap<i32, LightDef> {
+        return HashMap::new();
+    }
 }
 
 impl<R: Read> Decoder<R> for LightCell {
