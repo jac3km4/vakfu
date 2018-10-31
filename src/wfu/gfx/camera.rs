@@ -11,6 +11,7 @@ pub struct Camera<F> {
     accel: Matrix2<f32>,
     control: CamCtrl,
     ease: F,
+    pub lit: bool,
 }
 
 struct CamCtrl {
@@ -50,6 +51,7 @@ impl<F: Fn(f32) -> f32> Camera<F> {
                 left: false,
                 right: false,
             },
+            lit: true
         }
     }
 
@@ -120,6 +122,7 @@ impl<F: Fn(f32) -> f32> Camera<F> {
                         VirtualKeyCode::Subtract => self.zoom_factor *= ZOOM_SPEED,
                         VirtualKeyCode::Add => self.zoom_factor *= 1f32 / ZOOM_SPEED,
                         VirtualKeyCode::Escape => ::std::process::exit(0),
+                        VirtualKeyCode::Space => self.lit = !self.lit,
                         _ => (),
                     });
                 }

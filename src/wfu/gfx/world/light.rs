@@ -6,17 +6,10 @@ use wfu::io::decoder::{Decoder, DecoderCursor};
 use std::collections::HashMap;
 
 #[derive(Clone)]
-pub struct Rgb {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-}
-
-#[derive(Clone)]
 pub struct LightDef {
-    pub ambianceLight: Rgb,
-    pub shadows: Rgb,
-    pub lights: Rgb,
+    pub ambianceLight: Vec<f32>,
+    pub shadows: Vec<f32>,
+    pub lights: Vec<f32>,
     pub allowOutdoorLighting: bool,
     pub hasShadows: bool,
     pub merged: Vec<f32>,
@@ -55,21 +48,21 @@ impl<R: Read> Decoder<R> for LightCell {
 
             let def = LightDef {
                 allowOutdoorLighting: outdoor,
-                ambianceLight: Rgb {
-                    r: (ambiance & 0xFF) as f32 / 255f32 * 2f32,
-                    g:  (ambiance >> 8 & 0xFF) as f32 / 255f32 * 2f32,
-                    b:  (ambiance >> 16 & 0xFF) as f32 / 255f32 * 2f32,
-                },
-                shadows: Rgb {
-                    r: (shadow & 0xFF) as f32 / 255f32,
-                    g:  (shadow >> 8 & 0xFF) as f32 / 255f32,
-                    b:  (shadow >> 16 & 0xFF) as f32 / 255f32,
-                },
-                lights: Rgb {
-                    r: (light & 0xFF) as f32 / 255f32 - 0.5f32,
-                    g:  (light >> 8 & 0xFF) as f32 / 255f32 - 0.5f32,
-                    b:  (light >> 16 & 0xFF) as f32 / 255f32 - 0.5f32,
-                },
+                ambianceLight: vec! [
+                    (ambiance & 0xFF) as f32 / 255f32 * 2f32,
+                    (ambiance >> 8 & 0xFF) as f32 / 255f32 * 2f32,
+                    (ambiance >> 16 & 0xFF) as f32 / 255f32 * 2f32,
+                ],
+                shadows: vec! [
+                    (shadow & 0xFF) as f32 / 255f32,
+                    (shadow >> 8 & 0xFF) as f32 / 255f32,
+                    (shadow >> 16 & 0xFF) as f32 / 255f32,
+                ],
+                lights: vec! [
+                    (light & 0xFF) as f32 / 255f32 - 0.5f32,
+                    (light >> 8 & 0xFF) as f32 / 255f32 - 0.5f32,
+                    (light >> 16 & 0xFF) as f32 / 255f32 - 0.5f32,
+                ],
                 hasShadows: shadow as u32 != 0xFF808080,
                 merged: vec![0f32],
                 nightLight: night,
@@ -82,7 +75,7 @@ impl<R: Read> Decoder<R> for LightCell {
         let lcount :i16 = cur.decode();
         let mut layerColor :Vec<LightDef> = Vec::with_capacity((layerCount * numCells) as usize);
         
-        let blank = Rgb {r:1f32, g:1f32, b:1f32};
+        let blank = vec![1f32, 1f32, 1f32];
         for _ in 0.. layerCount * numCells
         {
             layerColor.push( LightDef {

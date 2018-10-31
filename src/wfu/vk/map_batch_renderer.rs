@@ -50,7 +50,7 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
         self.lod = lod;
     }
 
-    pub fn update(&mut self, time: u64, bounds: Matrix2<f32>) {
+    pub fn update(&mut self, time: u64, bounds: Matrix2<f32>, light: bool) {
         let lod = self.lod;
 
         let vertices = self
@@ -59,6 +59,7 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
             .filter(|s| s.sprite.is_visible(lod.get_mask()) && s.intersects(bounds))
             .flat_map(|bounded| {
                 bounded.sprite.update(time);
+                bounded.sprite.lit(light);
                 &bounded.sprite.vertex
             }).cloned();
 

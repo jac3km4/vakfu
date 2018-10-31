@@ -5,13 +5,13 @@ use wfu::gfx::world::element_definition::ElementDefinition;
 use wfu::gfx::world::light::LightMap;
 use wfu::gfx::world::light::LightCell;
 use wfu::gfx::world::light::LightDef;
-use wfu::gfx::world::light::Rgb;
 use wfu::vk::texture_pool::TextureIndex;
 use wfu::vk::vertex::Vertex;
 
 pub struct Sprite<'a> {
     pub vertex: Vec<Vertex>,
     element: &'a ElementDefinition,
+    colors: Vec<f32>,
 }
 
 impl<'a> Sprite<'a> {
@@ -29,6 +29,22 @@ impl<'a> Sprite<'a> {
                 self.vertex[3].tex_coords = [coords.right, coords.top];
             }
             None => (),
+        }
+    }
+
+    pub fn lit(&mut self, switch: bool) {
+        if switch {
+            for v in 0..4 {
+                for i in 0..3 {
+                    self.vertex[v].colors[i] = self.colors[i + 3];
+                }
+            }
+        } else {
+            for v in  0..4 {
+                for i in 0..3 {
+                    self.vertex[v].colors[i] = self.colors[i];
+                }
+            }
         }
     }
 
@@ -59,9 +75,9 @@ impl<'a> Sprite<'a> {
         let no_light = 
         LightDef {
             allowOutdoorLighting: false,
-            ambianceLight:  Rgb {r:1f32, g:1f32, b:1f32},
-            shadows:  Rgb {r:1f32, g:1f32, b:1f32},
-            lights:  Rgb {r:1f32, g:1f32, b:1f32},
+            ambianceLight: vec![1f32, 1f32, 1f32],
+            shadows: vec![1f32, 1f32, 1f32],
+            lights: vec![1f32, 1f32, 1f32],
             hasShadows: false,
             merged: vec![1f32],
             nightLight: vec![0f32, 0f32, 0f32],
@@ -78,19 +94,34 @@ impl<'a> Sprite<'a> {
         let hash = (spec.cell_x - cell.cellX) + ((spec.cell_y - cell.cellY) + (spec.layer_idx as i32 * 18)) * 18;
         let def =  &cell.layerColors[hash as usize];
 
+        let colorOrg = if spec.colors.len() == 3 {
+            [spec.colors[0], spec.colors[1], spec.colors[2]]
+        } else {
+            [0.5f32, 0.5f32, 0.5f32]
+        };
+
         let colors = if spec.colors.len() == 3 {
             [  
-                spec.colors[0] * def.ambianceLight.r,
-                spec.colors[1] * def.ambianceLight.g, 
-                spec.colors[2] * def.ambianceLight.b
+                spec.colors[0] * def.ambianceLight[0],
+                spec.colors[1] * def.ambianceLight[1], 
+                spec.colors[2] * def.ambianceLight[2]
             ]
         } else {
-            [  
-                0.5 * def.ambianceLight.r,
-                0.5 * def.ambianceLight.g, 
-                0.5 * def.ambianceLight.b
+            [ 
+                0.5 * def.ambianceLight[0],
+                0.5 * def.ambianceLight[1], 
+                0.5 * def.ambianceLight[2]
             ]
         };
+
+        let colorlights = vec![
+            colorOrg[0],
+            colorOrg[1],
+            colorOrg[2],
+            colors[0],
+            colors[1],
+            colors[2],
+        ];
 
         let vertice1 = Vertex {
             position: [left, -bottom],
@@ -119,7 +150,11 @@ impl<'a> Sprite<'a> {
 
         let vertex = vec![vertice1, vertice2, vertice3, vertice4];
 
-        Sprite { vertex, element }
+       Sprite { 
+            vertex, 
+            element, 
+            colors: colorlights
+        }
     }
 }
 

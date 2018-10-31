@@ -265,6 +265,7 @@ fn main() {
         renderer.update(
             timer.time_as_millis(),
             camera.get_bounds(dimensions[0], dimensions[1]),
+            camera.lit
         );
 
         let (vertex_buffer, upload_vertex) = renderer.get_vertex_buffer(queue.clone());
