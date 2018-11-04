@@ -88,7 +88,12 @@ fn main() {
 
     let mut options = Options::new();
     options
-        .optopt("p", "path", "Path to the game root directory", "/opt/game")
+        .optopt(
+            "p",
+            "path",
+            "Path to the game directory (one that contains 'contents' directory)",
+            "/opt/game",
+        )
         .optopt("m", "map-debug", "Run in a map render debug mode", "127")
         .optflag("l", "disable-light", "Disable light")
         .optflag("h", "help", "Print help menu");
