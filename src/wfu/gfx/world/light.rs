@@ -60,7 +60,7 @@ impl LightMap {
     pub fn get_color(&self, cell_x: i32, cell_y: i32, layer_idx: i32) -> Rc<LightDef> {
         let map_x = (cell_x as f32 / 18f32).floor() as i32;
         let map_y = (cell_y as f32 / 18f32).floor() as i32;
-        let key = map_x << 16 | map_y;
+        let key = map_x << 16 | (map_y & 0xFFFF);
 
         let default = LightCell {
             cell_x,
