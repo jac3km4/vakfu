@@ -2,9 +2,12 @@
 extern crate vulkano;
 #[macro_use]
 extern crate vulkano_shader_derive;
+extern crate getopts;
 extern crate vulkano_win;
 extern crate winit;
 
+use getopts::{Matches, Options};
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::sync::Arc;
@@ -18,11 +21,14 @@ use vulkano::sync::{now, GpuFuture};
 use vulkano_win::VkSurfaceBuild;
 use wfu::gfx::camera;
 use wfu::gfx::world::library::ElementLibrary;
+use wfu::gfx::world::light::LightMap;
 use wfu::io::tgam::TgamLoader;
+use wfu::util::input_state::InputState;
 use wfu::util::timer::Timer;
 use wfu::vk::map_batch_renderer;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
+use winit::VirtualKeyCode;
 
 pub mod wfu;
 
@@ -40,16 +46,55 @@ const BLENDING: AttachmentBlend = AttachmentBlend {
     mask_alpha: true,
 };
 
+struct Settings {
+    path: String,
+    mode: RenderMode,
+    disable_light: bool,
+}
+
+impl Settings {
+    pub fn from_options(opts: &Matches) -> Settings {
+        let path = opts.opt_str("p").expect("Path parameter is required");
+        let mode = match opts.opt_get::<i32>("m") {
+            Ok(Some(v)) => RenderMode::MapPreview(v),
+            _ => panic!("Unexpected render mode"),
+        };
+        let disable_light = opts.opt_present("l");
+        Settings {
+            path,
+            mode,
+            disable_light,
+        }
+    }
+}
+
+enum RenderMode {
+    MapPreview(i32),
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let path = args.get(1).expect("Expecting path as 1st param");
-    let map_id = args.get(2).expect("Expecting map id as 2nd param");
+    let options = Options::new()
+        .optopt("p", "path", "Path to the game root directory", "/opt/game")
+        .optopt(
+            "m",
+            "map-debug",
+            "Run the renderer in a map render debug mode",
+            "127",
+        ).optflag("l", "disable-light", "Disable light")
+        .parse(&args[1..])
+        .expect("Invalid program parameters");
 
-    let mut textures = TgamLoader::new(File::open(format!("{}\\{}", path, "gfx.jar")).unwrap());
+    let settings = Settings::from_options(&options);
 
-    let element_library =
-        ElementLibrary::load(File::open(format!("{}\\{}", path, "data.jar")).unwrap());
+    let mut texture_loader = TgamLoader::new(
+        File::open(format!("{}\\game\\contents\\maps\\gfx.jar", settings.path)).unwrap(),
+    );
+
+    let element_library = ElementLibrary::load(
+        File::open(format!("{}\\game\\contents\\maps\\data.jar", settings.path)).unwrap(),
+    );
 
     // vulkan startup below...
 
@@ -167,14 +212,35 @@ fn main() {
             .unwrap(),
     );
 
-    let mut renderer = map_batch_renderer::new_batch_renderer(
-        pipeline.clone(),
-        sampler,
-        queue.clone(),
-        File::open(format!("{}\\gfx\\{}.jar", path, map_id)).unwrap(),
-        &element_library,
-        &mut textures,
-    );
+    let mut renderer = match settings.mode {
+        RenderMode::MapPreview(map_id) => {
+            let light_map = if settings.disable_light {
+                LightMap {
+                    light_maps: HashMap::new(),
+                }
+            } else {
+                LightMap::load(
+                    File::open(format!(
+                        "{}\\game\\contents\\maps\\light\\{}.jar",
+                        settings.path, map_id
+                    )).unwrap(),
+                )
+            };
+
+            map_batch_renderer::new_batch_renderer(
+                pipeline.clone(),
+                sampler,
+                queue.clone(),
+                File::open(format!(
+                    "{}\\game\\contents\\maps\\gfx\\{}.jar",
+                    settings.path, map_id
+                )).unwrap(),
+                &element_library,
+                &mut texture_loader,
+                light_map,
+            )
+        }
+    };
 
     let mut framebuffers: Option<Vec<Arc<Framebuffer<_, _>>>> = None;
 
@@ -194,13 +260,14 @@ fn main() {
 
     let mut timer = Timer::new();
 
-    let mut camera = camera::with_ease_in_out_quad();
+    let mut input = InputState::new();
 
-    let mut focused = true;
+    let mut camera = camera::with_ease_in_out_quad();
 
     loop {
         let delta = timer.tick();
-        camera.update(delta);
+
+        camera.update(delta, &input);
         previous_frame_end.cleanup_finished();
         if recreate_swapchain {
             dimensions = surface
@@ -261,10 +328,10 @@ fn main() {
             value: camera.get_matrix(dimensions[0], dimensions[1]).into(),
         };
 
-        renderer.update(
-            timer.time_as_millis(),
-            camera.get_bounds(dimensions[0], dimensions[1]),
-        );
+        let bounds = camera.get_bounds(dimensions[0], dimensions[1]);
+
+        renderer.set_light_enabled(input.is_light_enabled());
+        renderer.update(timer.time_as_millis(), bounds);
 
         let (vertex_buffer, upload_vertex) = renderer.get_vertex_buffer(queue.clone());
         let (index_buffer, upload_index) = renderer.get_index_buffer(queue.clone());
@@ -313,20 +380,8 @@ fn main() {
             }
         }
 
-        let mut done = false;
-        events_loop.poll_events(|ev| match ev {
-            winit::Event::WindowEvent {
-                event: winit::WindowEvent::CloseRequested,
-                ..
-            } => done = true,
-            winit::Event::WindowEvent {
-                event: winit::WindowEvent::Focused(v),
-                ..
-            } => focused = v,
-            winit::Event::DeviceEvent { event, device_id } => camera.handle(event, focused),
-            _ => (),
-        });
-        if done {
+        events_loop.poll_events(|ev| input.update(ev));
+        if input.should_close() {
             ::std::process::exit(0);
         }
     }

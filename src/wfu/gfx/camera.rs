@@ -2,28 +2,20 @@ extern crate cgmath;
 extern crate winit;
 
 use self::cgmath::{Matrix2, Matrix4, Vector2};
-use winit::DeviceEvent;
+use wfu::util::input_state::InputState;
 use winit::VirtualKeyCode;
 
 pub struct Camera<F> {
     zoom_factor: f32,
     translation: Vector2<f32>,
     accel: Matrix2<f32>,
-    control: CamCtrl,
     ease: F,
-}
-
-struct CamCtrl {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
 }
 
 const ACCELERATION_FACTOR: f32 = 12_800f32;
 
 const MOVEMENT_SPEED: f32 = 0.4f32;
-const ZOOM_SPEED: f32 = 0.8f32;
+const ZOOM_SPEED: f32 = 0.9f32;
 
 const BOUND_LEEWAY: f32 = 1024f32;
 
@@ -44,12 +36,6 @@ impl<F: Fn(f32) -> f32> Camera<F> {
             ease,
             accel: Matrix2::new(0.0f32, 0.0f32, 0.0f32, 0.0f32),
             translation: Vector2 { x: 0f32, y: 0f32 },
-            control: CamCtrl {
-                up: false,
-                down: false,
-                left: false,
-                right: false,
-            },
         }
     }
 
@@ -79,18 +65,24 @@ impl<F: Fn(f32) -> f32> Camera<F> {
         }
     }
 
-    pub fn update(&mut self, delta: f64) {
-        if self.control.up {
+    pub fn update(&mut self, delta: f64, input: &InputState) {
+        if input.is_pressed(&VirtualKeyCode::Up) {
             self.accel.x.y = MOVEMENT_SPEED
         }
-        if self.control.down {
+        if input.is_pressed(&VirtualKeyCode::Down) {
             self.accel.y.y = MOVEMENT_SPEED
         }
-        if self.control.left {
+        if input.is_pressed(&VirtualKeyCode::Left) {
             self.accel.x.x = MOVEMENT_SPEED
         }
-        if self.control.right {
+        if input.is_pressed(&VirtualKeyCode::Right) {
             self.accel.y.x = MOVEMENT_SPEED
+        }
+        if input.is_pressed(&VirtualKeyCode::Subtract) {
+            self.zoom_factor *= ZOOM_SPEED
+        }
+        if input.is_pressed(&VirtualKeyCode::Add) {
+            self.zoom_factor *= 1f32 / ZOOM_SPEED
         }
 
         let ease = &self.ease;
@@ -98,42 +90,5 @@ impl<F: Fn(f32) -> f32> Camera<F> {
             Matrix2::from_cols(self.accel.x.map(|v| ease(v)), self.accel.y.map(|v| ease(v)));
         self.translation += self.accel.x * (ACCELERATION_FACTOR * delta as f32 / self.zoom_factor);
         self.translation -= self.accel.y * (ACCELERATION_FACTOR * delta as f32 / self.zoom_factor);
-    }
-
-    pub fn handle(&mut self, event: DeviceEvent, focus: bool) -> () {
-        if !focus {
-            self.control.up = false;
-            self.control.down = false;
-            self.control.left = false;
-            self.control.right = false;
-            return;
-        }
-
-        match event {
-            DeviceEvent::Key(input) => match input.state {
-                winit::ElementState::Pressed => {
-                    input.virtual_keycode.map(|code| match code {
-                        VirtualKeyCode::Up => self.control.up = true,
-                        VirtualKeyCode::Down => self.control.down = true,
-                        VirtualKeyCode::Left => self.control.left = true,
-                        VirtualKeyCode::Right => self.control.right = true,
-                        VirtualKeyCode::Subtract => self.zoom_factor *= ZOOM_SPEED,
-                        VirtualKeyCode::Add => self.zoom_factor *= 1f32 / ZOOM_SPEED,
-                        VirtualKeyCode::Escape => ::std::process::exit(0),
-                        _ => (),
-                    });
-                }
-                winit::ElementState::Released => {
-                    input.virtual_keycode.map(|code| match code {
-                        VirtualKeyCode::Up => self.control.up = false,
-                        VirtualKeyCode::Down => self.control.down = false,
-                        VirtualKeyCode::Left => self.control.left = false,
-                        VirtualKeyCode::Right => self.control.right = false,
-                        _ => (),
-                    });
-                }
-            },
-            _ => (),
-        }
     }
 }

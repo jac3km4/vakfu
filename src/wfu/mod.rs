@@ -8,6 +8,7 @@ pub mod gfx {
     pub mod world {
         pub mod element_definition;
         pub mod library;
+        pub mod light;
     }
     pub type TextureId = i32;
 }

@@ -21,6 +21,7 @@ use wfu::gfx::map_patch::{parse_patch, MapPatch};
 use wfu::gfx::render_spec::RenderSpec;
 use wfu::gfx::world::element_definition::ElementDefinition;
 use wfu::gfx::world::library::ElementLibrary;
+use wfu::gfx::world::light::{LightDef, LightMap};
 use wfu::gfx::TextureId;
 use wfu::io::decoder::DecoderCursor;
 use wfu::util::indexed::Indexed;
@@ -38,6 +39,7 @@ pub struct MapBatchRenderer<'a, D: DescriptorSetsCollection> {
     index_buffer: Vec<u32>,
     vertex_buffer: Vec<Vertex>,
     lod: LevelOfDetail,
+    enable_light: bool,
 }
 
 impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
@@ -45,16 +47,25 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
         self.lod = lod;
     }
 
+    pub fn set_light_enabled(&mut self, enabled: bool) {
+        self.enable_light = enabled;
+    }
+
+    pub fn is_light_enabled(&self) -> bool {
+        self.enable_light
+    }
+
     pub fn update(&mut self, time: u64, bounds: Matrix2<f32>) {
         let lod = self.lod;
+        let disable_light = !self.enable_light;
 
         let vertices = self
             .sprites
             .iter_mut()
             .filter(|s| s.sprite.is_visible(lod.get_mask()) && s.intersects(bounds))
             .flat_map(|bounded| {
-                bounded.sprite.update(time);
-                &bounded.sprite.vertex
+                bounded.sprite.update(time, disable_light);
+                bounded.sprite.get_vertex()
             }).cloned();
 
         self.vertex_buffer.clear();
@@ -97,6 +108,7 @@ pub fn new_batch_renderer<'a, T, R, S, L>(
     map_archive: S,
     element_library: &'a ElementLibrary,
     texture_loader: &mut R,
+    light_map: LightMap,
 ) -> MapBatchRenderer<'a, impl DescriptorSet>
 where
     T: VkTexture + 'static,
@@ -116,8 +128,13 @@ where
     let sprites = elements
         .iter()
         .filter_map(|spec| {
+            let color = light_map.get_color(
+                spec.render.cell_x,
+                spec.render.cell_y,
+                spec.render.layer_idx as i32,
+            );
             pool.get_texture_indice(spec.definition.texture_id)
-                .map(|desc| spec.create_sprite(*desc))
+                .map(|desc| spec.create_sprite(*desc, color))
         }).collect::<Vec<_>>();
 
     let descriptors = PersistentDescriptorSet::start(layout, 0)
@@ -138,6 +155,7 @@ where
         index_buffer,
         vertex_buffer,
         lod: LevelOfDetail::High,
+        enable_light: true,
     }
 }
 
@@ -162,8 +180,8 @@ struct SpriteSpec<'a> {
 }
 
 impl<'a> SpriteSpec<'a> {
-    pub fn create_sprite(&self, tex_idx: TextureIndex) -> BoundedSprite<'a> {
-        let sprite = Sprite::new(&self.render, self.definition, tex_idx);
+    pub fn create_sprite(&self, tex_idx: TextureIndex, light: Rc<LightDef>) -> BoundedSprite<'a> {
+        let sprite = Sprite::new(&self.render, self.definition, tex_idx, light);
         let bounds = Matrix2 {
             x: Vector2 {
                 x: iso_to_screen_x(self.patch.min_x, self.patch.min_y),
