@@ -68,8 +68,8 @@ impl InputState {
                 winit::ElementState::Pressed => {
                     input.virtual_keycode.map(|code| match code {
                         VirtualKeyCode::Escape => self.close_requested = true,
-                        _ => {
-                            self.pressed.insert(code);
+                        _ => { if self.focused {
+                            self.pressed.insert(code) } else { false };
                         }
                     });
                 }
