@@ -84,6 +84,9 @@ impl<F: Fn(f32) -> f32> Camera<F> {
         if input.is_pressed(&VirtualKeyCode::Add) {
             self.zoom_factor *= 1f32 / ZOOM_SPEED
         }
+        if input.is_pressed(&VirtualKeyCode::O) {
+            self.zoom_factor = 2f32
+        }
 
         let ease = &self.ease;
         self.accel =
