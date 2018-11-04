@@ -105,7 +105,7 @@ pub fn new_batch_renderer<'a, T, R, S, L>(
     layout: Arc<L>,
     sampler: Arc<Sampler>,
     queue: Arc<Queue>,
-    map_archive: S,
+    map_archive: &mut zip::ZipArchive<S>,
     element_library: &'a ElementLibrary,
     texture_loader: &mut R,
     light_map: LightMap,
@@ -196,9 +196,10 @@ impl<'a> SpriteSpec<'a> {
     }
 }
 
-fn load_sprites<S: Read + Seek>(map_archive: S, library: &ElementLibrary) -> Vec<SpriteSpec> {
-    let mut archive = zip::ZipArchive::new(map_archive).unwrap();
-
+fn load_sprites<'a, S: Read + Seek>(
+    archive: &mut zip::ZipArchive<S>,
+    library: &'a ElementLibrary,
+) -> Vec<SpriteSpec<'a>> {
     (0..archive.len())
         .filter_map(|i| {
             let entry = archive.by_index(i).unwrap();

@@ -24,6 +24,7 @@ use wfu::gfx::world::library::ElementLibrary;
 use wfu::gfx::world::light::LightMap;
 use wfu::io::tgam::TgamLoader;
 use wfu::util::input_state::InputState;
+use wfu::util::resources::Resources;
 use wfu::util::timer::Timer;
 use wfu::vk::map_batch_renderer;
 use wfu::vk::vertex::Vertex;
@@ -88,13 +89,11 @@ fn main() {
 
     let settings = Settings::from_options(&options);
 
-    let mut texture_loader = TgamLoader::new(
-        File::open(format!("{}\\game\\contents\\maps\\gfx.jar", settings.path)).unwrap(),
-    );
+    let resources = Resources::new(settings.path);
 
-    let element_library = ElementLibrary::load(
-        File::open(format!("{}\\game\\contents\\maps\\data.jar", settings.path)).unwrap(),
-    );
+    let mut texture_loader = resources.load_tgam_loader();
+
+    let element_library = resources.load_element_library();
 
     // vulkan startup below...
 
@@ -219,22 +218,14 @@ fn main() {
                     light_maps: HashMap::new(),
                 }
             } else {
-                LightMap::load(
-                    File::open(format!(
-                        "{}\\game\\contents\\maps\\light\\{}.jar",
-                        settings.path, map_id
-                    )).unwrap(),
-                )
+                resources.load_light_map(map_id)
             };
 
             map_batch_renderer::new_batch_renderer(
                 pipeline.clone(),
                 sampler,
                 queue.clone(),
-                File::open(format!(
-                    "{}\\game\\contents\\maps\\gfx\\{}.jar",
-                    settings.path, map_id
-                )).unwrap(),
+                &mut resources.load_gfx_map_archive(map_id),
                 &element_library,
                 &mut texture_loader,
                 light_map,
