@@ -78,12 +78,12 @@ pub struct Frames {
 }
 
 impl Frames {
-    pub fn get_texture_coords(&self, time: u64) -> TextureCoords {
-        let passed = time % self.total_time as u64;
+    pub fn get_texture_coords(&self, time: i64) -> TextureCoords {
+        let passed = time % self.total_time as i64;
         let idx = self
             .frame_offsets
             .iter()
-            .take_while(|i| passed > (**i as u64))
+            .take_while(|i| passed > (**i as i64))
             .count();
         self.texture_coords[idx]
     }

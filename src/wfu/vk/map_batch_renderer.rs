@@ -40,7 +40,7 @@ pub struct MapBatchRenderer<'a, D: DescriptorSetsCollection> {
     vertex_buffer: Vec<Vertex>,
     lod: LevelOfDetail,
     enable_light: bool,
-    disabled_layer: u8
+    disabled_layers: u8,
 }
 
 impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
@@ -56,19 +56,19 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
         self.enable_light
     }
 
-    pub fn set_layer_disabled(&mut self, layer: u8) {
-        self.disabled_layer = layer;
+    pub fn set_layers_disabled(&mut self, layer: u8) {
+        self.disabled_layers = layer;
     }
 
-    pub fn update(&mut self, time: u64, bounds: Matrix2<f32>) {
+    pub fn update(&mut self, time: i64, bounds: Matrix2<f32>) {
         let lod = self.lod;
         let disable_light = !self.enable_light;
-        let disabled_layer = self.disabled_layer;
+        let disabled_layers = self.disabled_layers;
 
         let vertices = self
             .sprites
             .iter_mut()
-            .filter(|layer| !layer.sprite.is_in_layer(disabled_layer))
+            .filter(|layer| !layer.sprite.is_in_layer(disabled_layers))
             .filter(|s| s.sprite.is_visible(lod.get_mask()) && s.intersects(bounds))
             .flat_map(|bounded| {
                 bounded.sprite.update(time, disable_light);
@@ -147,6 +147,8 @@ where
         })
         .collect::<Vec<_>>();
 
+    info!("Pre-loaded {} sprites", sprites.len());
+
     let descriptors = PersistentDescriptorSet::start(layout, 0)
         .add_sampled_images(images, sampler)
         .unwrap()
@@ -157,6 +159,8 @@ where
         .flat_map(|i| indexes_at(i))
         .collect::<Vec<_>>();
 
+    info!("Initialized index buffer of size {}", index_buffer.len());
+
     let vertex_buffer: Vec<Vertex> = Vec::new();
 
     MapBatchRenderer {
@@ -166,7 +170,7 @@ where
         vertex_buffer,
         lod: LevelOfDetail::High,
         enable_light: true,
-        disabled_layer: 0,
+        disabled_layers: 0,
     }
 }
 

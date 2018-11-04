@@ -33,11 +33,21 @@ impl TexturePool {
 
         let tmp = load_working_set(texture_loader, working_set, queue);
 
+        info!("Pre-loaded {} textures into the GPU", tmp.len());
+
         let indices = tmp
             .iter()
             .enumerate()
             .map(|(i, (tex_id, _))| (*tex_id, i as TextureIndex))
             .collect::<HashMap<_, _>>();
+
+        if tmp.len() > TEXTURE_LIMIT {
+            warn!(
+                "Map texture working set exceeds the limit ({} > {})",
+                tmp.len(),
+                TEXTURE_LIMIT
+            );
+        }
 
         let images = tmp
             .iter()

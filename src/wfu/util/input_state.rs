@@ -11,7 +11,7 @@ pub struct InputState {
     focused: bool,
     close_requested: bool,
     light_enabled: bool,
-    layer_disabled: u8,
+    layers_disabled: u8,
 }
 
 impl InputState {
@@ -21,7 +21,7 @@ impl InputState {
             focused: true,
             close_requested: false,
             light_enabled: true,
-            layer_disabled: 0,
+            layers_disabled: 0,
         }
     }
 
@@ -37,13 +37,13 @@ impl InputState {
         self.light_enabled
     }
 
-    pub fn set_disabled_layers(&mut self , layer:u8) {
-        self.layer_disabled = self.layer_disabled ^ (1 << layer);
-        println!("Disabled layer: {:#010b}", self.layer_disabled);
+    pub fn set_disabled_layers(&mut self, layer: u8) {
+        self.layers_disabled = self.layers_disabled ^ (1 << layer);
+        info!("Disabled layers: {:#010b}", self.layers_disabled);
     }
 
     pub fn disabled_layers(&self) -> u8 {
-        self.layer_disabled
+        self.layers_disabled
     }
 
     pub fn update(&mut self, event: Event) {
@@ -68,8 +68,12 @@ impl InputState {
                 winit::ElementState::Pressed => {
                     input.virtual_keycode.map(|code| match code {
                         VirtualKeyCode::Escape => self.close_requested = true,
-                        _ => { if self.focused {
-                            self.pressed.insert(code) } else { false };
+                        _ => {
+                            if self.focused {
+                                self.pressed.insert(code)
+                            } else {
+                                false
+                            };
                         }
                     });
                 }
@@ -86,7 +90,7 @@ impl InputState {
                             VirtualKeyCode::Key6 => self.set_disabled_layers(5),
                             VirtualKeyCode::Key7 => self.set_disabled_layers(6),
                             VirtualKeyCode::Key8 => self.set_disabled_layers(7),
-                            VirtualKeyCode::Key0 => self.layer_disabled = 0,
+                            VirtualKeyCode::Key0 => self.layers_disabled = 0,
                             _ => (),
                         };
                     });

@@ -29,7 +29,7 @@ impl<'a> Sprite<'a> {
         &self.vertex
     }
 
-    pub fn update(&mut self, time: u64, disable_light: bool) {
+    pub fn update(&mut self, time: i64, disable_light: bool) {
         match &self.element.frames {
             Some(frames) => {
                 let coords = frames.get_texture_coords(time);
@@ -68,7 +68,7 @@ impl<'a> Sprite<'a> {
             .frames
             .clone()
             .map_or(element.texture_coords, |frames| {
-                frames.get_texture_coords(0u64)
+                frames.get_texture_coords(0i64)
             });
 
         let left = spec.get_x(element) as f32;
