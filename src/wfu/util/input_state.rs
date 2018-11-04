@@ -11,6 +11,7 @@ pub struct InputState {
     focused: bool,
     close_requested: bool,
     light_enabled: bool,
+    layer_disabled: u8,
 }
 
 impl InputState {
@@ -20,6 +21,7 @@ impl InputState {
             focused: true,
             close_requested: false,
             light_enabled: true,
+            layer_disabled: 0,
         }
     }
 
@@ -33,6 +35,15 @@ impl InputState {
 
     pub fn is_light_enabled(&self) -> bool {
         self.light_enabled
+    }
+
+    pub fn set_disabled_layers(&mut self , layer:u8) {
+        self.layer_disabled = self.layer_disabled ^ (1 << layer);
+        println!("Disabled layer: {:#010b}", self.layer_disabled);
+    }
+
+    pub fn disabled_layers(&self) -> u8 {
+        self.layer_disabled
     }
 
     pub fn update(&mut self, event: Event) {
@@ -67,6 +78,15 @@ impl InputState {
                         self.pressed.remove(&code);
                         match code {
                             VirtualKeyCode::L => self.light_enabled = !self.light_enabled,
+                            VirtualKeyCode::Key1 => self.set_disabled_layers(0),
+                            VirtualKeyCode::Key2 => self.set_disabled_layers(1),
+                            VirtualKeyCode::Key3 => self.set_disabled_layers(2),
+                            VirtualKeyCode::Key4 => self.set_disabled_layers(3),
+                            VirtualKeyCode::Key5 => self.set_disabled_layers(4),
+                            VirtualKeyCode::Key6 => self.set_disabled_layers(5),
+                            VirtualKeyCode::Key7 => self.set_disabled_layers(6),
+                            VirtualKeyCode::Key8 => self.set_disabled_layers(7),
+                            VirtualKeyCode::Key0 => self.layer_disabled = 0,
                             _ => (),
                         };
                     });
