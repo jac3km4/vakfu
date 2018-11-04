@@ -341,6 +341,7 @@ fn main() {
         let bounds = camera.get_bounds(dimensions[0], dimensions[1]);
 
         renderer.set_light_enabled(input.is_light_enabled());
+        renderer.set_layer_disabled(input.disabled_layers());
         renderer.update(timer.time_as_millis(), bounds);
 
         let (vertex_buffer, upload_vertex) = renderer.get_vertex_buffer(queue.clone());

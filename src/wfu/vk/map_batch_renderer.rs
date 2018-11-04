@@ -40,6 +40,7 @@ pub struct MapBatchRenderer<'a, D: DescriptorSetsCollection> {
     vertex_buffer: Vec<Vertex>,
     lod: LevelOfDetail,
     enable_light: bool,
+    disabled_layer: u8
 }
 
 impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
@@ -55,13 +56,19 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
         self.enable_light
     }
 
+    pub fn set_layer_disabled(&mut self, layer: u8) {
+        self.disabled_layer = layer;
+    }
+
     pub fn update(&mut self, time: u64, bounds: Matrix2<f32>) {
         let lod = self.lod;
         let disable_light = !self.enable_light;
+        let disabled_layer = self.disabled_layer;
 
         let vertices = self
             .sprites
             .iter_mut()
+            .filter(|layer| !layer.sprite.is_in_layer(disabled_layer))
             .filter(|s| s.sprite.is_visible(lod.get_mask()) && s.intersects(bounds))
             .flat_map(|bounded| {
                 bounded.sprite.update(time, disable_light);
@@ -159,6 +166,7 @@ where
         vertex_buffer,
         lod: LevelOfDetail::High,
         enable_light: true,
+        disabled_layer: 0,
     }
 }
 
