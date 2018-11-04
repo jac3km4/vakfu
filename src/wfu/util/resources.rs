@@ -18,7 +18,7 @@ impl Resources {
     }
 
     fn maps_root(&self) -> PathBuf {
-        self.path.join("game").join("contents").join("maps")
+        self.path.join("contents").join("maps")
     }
 
     pub fn load_tgam_loader(&self) -> TgamLoader<File> {
