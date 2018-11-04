@@ -83,7 +83,8 @@ fn main() {
             "map-debug",
             "Run the renderer in a map render debug mode",
             "127",
-        ).optflag("l", "disable-light", "Disable light")
+        )
+        .optflag("l", "disable-light", "Disable light")
         .parse(&args[1..])
         .expect("Invalid program parameters");
 
@@ -132,7 +133,8 @@ fn main() {
         physical.supported_features(),
         &device_ext,
         [(queue_family, 0.5)].iter().cloned(),
-    ).expect("failed to create device");
+    )
+    .expect("failed to create device");
     let queue = queues.next().unwrap();
 
     let (mut swapchain, mut images) = {
@@ -159,7 +161,8 @@ fn main() {
             vulkano::swapchain::PresentMode::Fifo,
             true,
             None,
-        ).expect("failed to create swapchain")
+        )
+        .expect("failed to create swapchain")
     };
 
     let vs = vertex_shader::Shader::load(device.clone()).expect("failed to create shader module");
@@ -179,7 +182,8 @@ fn main() {
                 color: [color],
                 depth_stencil: {}
             }
-        ).unwrap(),
+        )
+        .unwrap(),
     );
 
     let sampler = Sampler::new(
@@ -194,7 +198,8 @@ fn main() {
         1.0,
         0.0,
         0.0,
-    ).unwrap();
+    )
+    .unwrap();
 
     let pipeline = Arc::new(
         GraphicsPipeline::start()
@@ -301,7 +306,8 @@ fn main() {
                                 .build()
                                 .unwrap(),
                         )
-                    }).collect::<Vec<_>>(),
+                    })
+                    .collect::<Vec<_>>(),
             );
         }
 
@@ -334,7 +340,8 @@ fn main() {
                     framebuffers.as_ref().unwrap()[image_num].clone(),
                     false,
                     vec![[0.0, 0.0, 0.0, 1.0].into()],
-                ).unwrap()
+                )
+                .unwrap()
                 .draw_indexed(
                     pipeline.clone(),
                     &dynamic_state,
@@ -342,7 +349,8 @@ fn main() {
                     index_buffer.clone(),
                     renderer.get_descriptors(),
                     matrix,
-                ).unwrap()
+                )
+                .unwrap()
                 .end_render_pass()
                 .unwrap()
                 .build()

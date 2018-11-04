@@ -12,7 +12,9 @@ pub struct Resources {
 
 impl Resources {
     pub fn new(path: String) -> Resources {
-        Resources { path: PathBuf::from(path) }
+        Resources {
+            path: PathBuf::from(path),
+        }
     }
 
     fn maps_root(&self) -> PathBuf {
@@ -30,7 +32,10 @@ impl Resources {
     }
 
     pub fn load_light_map(&self, map_id: i32) -> LightMap {
-        let path = self.maps_root().join("light").join(format!("{}.jar", map_id));
+        let path = self
+            .maps_root()
+            .join("light")
+            .join(format!("{}.jar", map_id));
         LightMap::load(File::open(path).unwrap())
     }
 

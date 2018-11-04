@@ -21,7 +21,8 @@ impl VkTexture for TgamTexture {
             vulkano::image::Dimensions::Dim2d { width, height },
             vulkano::format::R8G8B8A8Unorm,
             queue.clone(),
-        ).unwrap();
+        )
+        .unwrap();
         (img, Box::new(cmd) as Box<GpuFuture>)
     }
 }

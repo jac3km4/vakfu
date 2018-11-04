@@ -66,7 +66,8 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
             .flat_map(|bounded| {
                 bounded.sprite.update(time, disable_light);
                 bounded.sprite.get_vertex()
-            }).cloned();
+            })
+            .cloned();
 
         self.vertex_buffer.clear();
         self.vertex_buffer.extend(vertices);
@@ -82,7 +83,8 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
             self.index_buffer.iter().take(index_count).cloned(),
             vulkano::buffer::BufferUsage::index_buffer(),
             queue.clone(),
-        ).expect("failed to create buffer")
+        )
+        .expect("failed to create buffer")
     }
 
     pub fn get_vertex_buffer(
@@ -93,7 +95,8 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
             self.vertex_buffer.iter().cloned(),
             vulkano::buffer::BufferUsage::vertex_buffer(),
             queue.clone(),
-        ).expect("failed to create buffer")
+        )
+        .expect("failed to create buffer")
     }
 
     pub fn get_descriptors(&self) -> Arc<D> {
@@ -135,7 +138,8 @@ where
             );
             pool.get_texture_indice(spec.definition.texture_id)
                 .map(|desc| spec.create_sprite(*desc, color))
-        }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     let descriptors = PersistentDescriptorSet::start(layout, 0)
         .add_sampled_images(images, sampler)
@@ -205,7 +209,8 @@ fn load_sprites<'a, S: Read + Seek>(
             let entry = archive.by_index(i).unwrap();
             parse_patch(entry.name())
                 .map(|_| Rc::new(DecoderCursor::new(entry).decode::<MapPatch>()))
-        }).flat_map(|patch| {
+        })
+        .flat_map(|patch| {
             patch
                 .elements
                 .iter()
@@ -217,6 +222,8 @@ fn load_sprites<'a, S: Read + Seek>(
                             definition: element,
                             patch: patch.clone(),
                         })
-                }).collect::<Vec<_>>()
-        }).sorted_by_key(|spec| spec.render.hashcode())
+                })
+                .collect::<Vec<_>>()
+        })
+        .sorted_by_key(|spec| spec.render.hashcode())
 }
