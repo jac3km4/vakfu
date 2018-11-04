@@ -66,7 +66,8 @@ fn load_empty_image(queue: Arc<Queue>) -> Arc<ImmutableImage<R8G8B8A8Unorm>> {
             dimensions,
             R8G8B8A8Unorm,
             queue.clone(),
-        ).unwrap()
+        )
+        .unwrap()
     };
 
     cmd.flush().unwrap();
@@ -90,5 +91,6 @@ where
 
             cmd.flush().unwrap();
             (e, image)
-        }).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
 }
