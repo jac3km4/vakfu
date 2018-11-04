@@ -1,13 +1,18 @@
+extern crate cgmath;
 extern crate vulkano;
 
+use std::rc::Rc;
 use wfu::gfx::render_spec::RenderSpec;
 use wfu::gfx::world::element_definition::ElementDefinition;
+use wfu::gfx::world::light::LightDef;
 use wfu::vk::texture_pool::TextureIndex;
 use wfu::vk::vertex::Vertex;
 
 pub struct Sprite<'a> {
-    pub vertex: Vec<Vertex>,
+    vertex: [Vertex; 4],
     element: &'a ElementDefinition,
+    colors: [f32; 3],
+    light: Rc<LightDef>,
 }
 
 impl<'a> Sprite<'a> {
@@ -15,7 +20,11 @@ impl<'a> Sprite<'a> {
         self.element.visibility_mask & mask == self.element.visibility_mask
     }
 
-    pub fn update(&mut self, time: u64) {
+    pub fn get_vertex(&self) -> &[Vertex; 4] {
+        &self.vertex
+    }
+
+    pub fn update(&mut self, time: u64, disable_light: bool) {
         match &self.element.frames {
             Some(frames) => {
                 let coords = frames.get_texture_coords(time);
@@ -26,12 +35,29 @@ impl<'a> Sprite<'a> {
             }
             None => (),
         }
+        let colors = self.get_colors(disable_light);
+        for v in self.vertex.iter_mut() {
+            v.colors = colors;
+        }
+    }
+
+    fn get_colors(&mut self, disable_light: bool) -> [f32; 3] {
+        if !disable_light {
+            [
+                self.colors[0] * self.light.ambiance_light[0],
+                self.colors[1] * self.light.ambiance_light[1],
+                self.colors[2] * self.light.ambiance_light[2],
+            ]
+        } else {
+            self.colors.to_owned()
+        }
     }
 
     pub fn new(
         spec: &RenderSpec,
         element: &'a ElementDefinition,
         tex_id: TextureIndex,
+        light: Rc<LightDef>,
     ) -> Sprite<'a> {
         let coords = element
             .frames
@@ -76,9 +102,14 @@ impl<'a> Sprite<'a> {
             tex_id,
         };
 
-        let vertex = vec![vertice1, vertice2, vertice3, vertice4];
+        let vertex = [vertice1, vertice2, vertice3, vertice4];
 
-        Sprite { vertex, element }
+        Sprite {
+            vertex,
+            element,
+            colors,
+            light,
+        }
     }
 }
 
