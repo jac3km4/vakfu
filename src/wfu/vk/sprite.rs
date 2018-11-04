@@ -13,11 +13,16 @@ pub struct Sprite<'a> {
     element: &'a ElementDefinition,
     colors: [f32; 3],
     light: Rc<LightDef>,
+    layer: u8,
 }
 
 impl<'a> Sprite<'a> {
     pub fn is_visible(&self, mask: u8) -> bool {
         self.element.visibility_mask & mask == self.element.visibility_mask
+    }
+
+    pub fn is_in_layer(&self, layer: u8) -> bool {
+        (1 << self.layer) & layer == (1 << self.layer)
     }
 
     pub fn get_vertex(&self) -> &[Vertex; 4] {
@@ -109,6 +114,7 @@ impl<'a> Sprite<'a> {
             element,
             colors,
             light,
+            layer: spec.layer_idx,
         }
     }
 }
