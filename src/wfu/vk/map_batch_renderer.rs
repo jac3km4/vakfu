@@ -66,8 +66,7 @@ impl<'a, D: DescriptorSetsCollection> MapBatchRenderer<'a, D> {
             .flat_map(|bounded| {
                 bounded.sprite.update(time, disable_light);
                 bounded.sprite.get_vertex()
-            })
-            .cloned();
+            });
 
         self.vertex_buffer.clear();
         self.vertex_buffer.extend(vertices);

@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Vertex {
     pub position: [f32; 2],
     pub tex_coords: [f32; 2],
