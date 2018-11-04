@@ -54,18 +54,23 @@ struct Settings {
 }
 
 impl Settings {
-    pub fn from_options(opts: &Matches) -> Settings {
-        let path = opts.opt_str("p").expect("Path parameter is required");
-        let mode = match opts.opt_get::<i32>("m") {
-            Ok(Some(v)) => RenderMode::MapPreview(v),
-            _ => panic!("Unexpected render mode"),
-        };
+    pub fn from_options(opts: &Matches) -> Option<Settings> {
+        let path = opts.opt_str("p");
+        let mode = opts
+            .opt_get::<i32>("m")
+            .ok()
+            .and_then(|v| v)
+            .map(|map_id| RenderMode::MapPreview(map_id));
+
         let disable_light = opts.opt_present("l");
-        Settings {
-            path,
-            mode,
-            disable_light,
-        }
+
+        path.and_then(|path| {
+            mode.map(|mode| Settings {
+                path,
+                mode,
+                disable_light,
+            })
+        })
     }
 }
 
@@ -76,19 +81,27 @@ enum RenderMode {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let options = Options::new()
+    let mut options = Options::new();
+    options
         .optopt("p", "path", "Path to the game root directory", "/opt/game")
-        .optopt(
-            "m",
-            "map-debug",
-            "Run the renderer in a map render debug mode",
-            "127",
-        )
+        .optopt("m", "map-debug", "Run in a map render debug mode", "127")
         .optflag("l", "disable-light", "Disable light")
-        .parse(&args[1..])
-        .expect("Invalid program parameters");
+        .optflag("h", "help", "Print help menu");
 
-    let settings = Settings::from_options(&options);
+    let settings = match options.parse(&args[1..]) {
+        Ok(matches) => {
+            let settings = Settings::from_options(&matches);
+            let show_help = matches.opt_present("h");
+            match (settings, show_help) {
+                (None, _) | (_, true) => {
+                    print!("{}", options.usage("Usage: vakfu [options]"));
+                    return;
+                }
+                (Some(result), false) => result,
+            }
+        }
+        Err(f) => panic!(f.to_string()),
+    };
 
     let resources = Resources::new(settings.path);
 
