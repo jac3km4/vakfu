@@ -2,14 +2,17 @@
 extern crate vulkano;
 #[macro_use]
 extern crate vulkano_shader_derive;
+#[macro_use]
+extern crate log;
 extern crate getopts;
+extern crate simplelog;
 extern crate vulkano_win;
 extern crate winit;
 
 use getopts::{Matches, Options};
+use simplelog::*;
 use std::collections::HashMap;
 use std::env;
-use std::fs::File;
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::framebuffer::Framebuffer;
@@ -20,16 +23,13 @@ use vulkano::sampler::Sampler;
 use vulkano::sync::{now, GpuFuture};
 use vulkano_win::VkSurfaceBuild;
 use wfu::gfx::camera;
-use wfu::gfx::world::library::ElementLibrary;
 use wfu::gfx::world::light::LightMap;
-use wfu::io::tgam::TgamLoader;
 use wfu::util::input_state::InputState;
 use wfu::util::resources::Resources;
 use wfu::util::timer::Timer;
 use wfu::vk::map_batch_renderer;
 use wfu::vk::vertex::Vertex;
 use wfu::vk::{fragment_shader, vertex_shader};
-use winit::VirtualKeyCode;
 
 pub mod wfu;
 
@@ -79,6 +79,11 @@ enum RenderMode {
 }
 
 fn main() {
+    CombinedLogger::init(vec![
+        TermLogger::new(LevelFilter::Trace, Config::default()).unwrap()
+    ])
+    .unwrap();
+
     let args: Vec<String> = env::args().collect();
 
     let mut options = Options::new();
@@ -341,7 +346,7 @@ fn main() {
         let bounds = camera.get_bounds(dimensions[0], dimensions[1]);
 
         renderer.set_light_enabled(input.is_light_enabled());
-        renderer.set_layer_disabled(input.disabled_layers());
+        renderer.set_layers_disabled(input.disabled_layers());
         renderer.update(timer.time_as_millis(), bounds);
 
         let (vertex_buffer, upload_vertex) = renderer.get_vertex_buffer(queue.clone());

@@ -12,7 +12,7 @@ pub struct Camera<F> {
     ease: F,
 }
 
-const ACCELERATION_FACTOR: f32 = 12_800f32;
+const ACCELERATION_FACTOR: f32 = 12f32;
 
 const MOVEMENT_SPEED: f32 = 0.4f32;
 const ZOOM_SPEED: f32 = 0.9f32;
@@ -65,7 +65,7 @@ impl<F: Fn(f32) -> f32> Camera<F> {
         }
     }
 
-    pub fn update(&mut self, delta: f64, input: &InputState) {
+    pub fn update(&mut self, delta: i64, input: &InputState) {
         if input.is_pressed(&VirtualKeyCode::Up) {
             self.accel.x.y = MOVEMENT_SPEED
         }
