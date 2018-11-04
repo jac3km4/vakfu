@@ -1,5 +1,6 @@
 pub mod indexed;
 pub mod input_state;
+pub mod resources;
 pub mod timer;
 
 pub fn first_greater_power_of_two(value: i32) -> i32 {
