@@ -4,14 +4,14 @@ version = "0.2.0"
 authors = ["Jacek Malec <jac3km4@gmail.com>"]
 
 [dependencies]
-vulkano = { git = "https://github.com/vulkano-rs/vulkano" }
-vulkano-win = { git = "https://github.com/vulkano-rs/vulkano" }
-vulkano-shaders = { git = "https://github.com/vulkano-rs/vulkano" }
-winit = "0.17.2"
-zip = "0.4"
-byteorder = "1"
+vulkano = "0.11.1"
+vulkano-win = "0.11.1"
+vulkano-shaders = "0.11.1"
+winit = "0.18.0"
+zip = "0.5.0"
+byteorder = "1.2.7"
 cgmath = "0.16.1"
-itertools = "0.7.8"
+itertools = "0.8.0"
 getopts = "0.2.18"
 log = "0.4.6"
 simplelog = "0.5.3"
