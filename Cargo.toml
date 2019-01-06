@@ -1,6 +1,6 @@
 [package]
 name = "vakfu"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Jacek Malec <jac3km4@gmail.com>"]
 
 [dependencies]
