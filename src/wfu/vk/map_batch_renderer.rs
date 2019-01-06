@@ -237,4 +237,5 @@ fn load_sprites<'a, S: Read + Seek>(
                 .collect::<Vec<_>>()
         })
         .sorted_by_key(|spec| spec.render.hashcode())
+        .collect()
 }
