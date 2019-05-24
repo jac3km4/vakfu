@@ -46,7 +46,7 @@ void main() {
     pub mod texture_pool;
     pub mod vertex;
     pub mod vertex_shader {
-        vulkano_shaders::shader!{
+        vulkano_shaders::shader! {
         ty: "vertex",
         src: "
 #version 450
