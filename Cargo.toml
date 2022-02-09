@@ -1,18 +1,23 @@
 [package]
 name = "vakfu"
-version = "0.3.1"
-authors = ["Jacek Malec <jac3km4@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-vulkano = "0.11.1"
-vulkano-win = "0.11.1"
-vulkano-shaders = "0.11.1"
-winit = "0.18.1"
-zip = "0.5.2"
-byteorder = "1.3.1"
-cgmath = "0.17.0"
-itertools = "0.8.0"
-getopts = "0.2.19"
-log = "0.4.6"
-simplelog = "0.5.3"
-chrono = "0.4.6"
+anyhow = "1"
+pico-args = "0.4"
+byte = "0.2"
+modular-bitfield = "0.11"
+glam = "0.20"
+itertools = "0.10"
+
+[dependencies.zip]
+version = "0.5"
+default-features = false
+features = [ "deflate" ]
+
+[dependencies.bevy]
+git = "https://github.com/jac3km4/bevy.git"
+branch = "custom-blending"
+default-features = false
+features = [ "bevy_winit", "render", "x11" ]
