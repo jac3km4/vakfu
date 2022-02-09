@@ -4,22 +4,6 @@ use byte::{BytesExt, TryRead};
 use glam::Vec2;
 use itertools::Itertools;
 
-#[derive(Debug)]
-pub enum Animation {
-    Static,
-    Animated(Frames),
-}
-
-impl Animation {
-    #[inline]
-    pub fn frame_rects(&self) -> Option<&[Rect]> {
-        match self {
-            Animation::Static => None,
-            Animation::Animated(frames) => Some(&frames.frame_rects),
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct Frames {
     pub total_time: u32,

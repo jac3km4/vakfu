@@ -6,10 +6,10 @@ use glam::{IVec2, Vec2};
 
 use crate::map::chunk::MapChunk;
 
-pub mod animation;
 pub mod chunk;
 #[allow(unused)]
 pub mod element;
+pub mod frames;
 pub mod sprite;
 
 const CELL_WIDTH: f32 = 86.;

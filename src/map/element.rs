@@ -7,7 +7,7 @@ use byte::{BytesExt, TryRead};
 use glam::Vec2;
 use modular_bitfield::prelude::*;
 
-use crate::map::animation::Animation;
+use super::frames::Frames;
 
 #[derive(Debug)]
 pub struct MapElement {
@@ -22,7 +22,7 @@ pub struct MapElement {
     pub visibility_mask: u8,
     pub export_mask: u8,
     pub shader: u8,
-    pub animation: Animation,
+    pub animation: Option<Frames>,
     pub ground_sound: u8,
 }
 
@@ -34,8 +34,8 @@ impl MapElement {
 
     pub fn size(&self) -> Vec2 {
         match self.animation {
-            Animation::Static => self.image_size(),
-            Animation::Animated(ref frames) => frames.frame_rects[0].size(),
+            None => self.image_size(),
+            Some(ref frames) => frames.frame_rects[0].size(),
         }
     }
 
@@ -69,10 +69,10 @@ impl<'a> TryRead<'a> for MapElement {
         let export_mask: u8 = bytes.read(offset)?;
         let shader: u8 = bytes.read(offset)?;
         let frame_count: u8 = bytes.read(offset)?;
-        let animation: Animation = if frame_count > 0 {
-            Animation::Animated(bytes.read_with(offset, frame_count)?)
+        let animation = if frame_count > 0 {
+            Some(bytes.read_with(offset, frame_count)?)
         } else {
-            Animation::Static
+            None
         };
         let ground_sound = bytes.read(offset)?;
 

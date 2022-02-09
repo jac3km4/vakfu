@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy::sprite::Rect;
 
-use crate::map::animation::Frames;
 use crate::map::chunk::MapChunk;
+use crate::map::frames::Frames;
 use crate::map::iso_to_screen;
 
 #[derive(Default, Component)]
@@ -62,19 +62,19 @@ pub fn map_chunk_view_system(
 pub struct AnimatedSpriteBundle {
     pub sprite: TextureAtlasSprite,
     pub texture_atlas: Handle<TextureAtlas>,
-    pub animation: AnimationSpec,
+    pub animation: Animation,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub visibility: Visibility,
 }
 
 #[derive(Default, Component)]
-pub struct AnimationSpec {
+pub struct Animation {
     total_time: u32,
     frame_times: Vec<u16>,
 }
 
-impl AnimationSpec {
+impl Animation {
     pub fn new(frames: &Frames) -> Self {
         Self {
             total_time: frames.total_time,
@@ -83,10 +83,7 @@ impl AnimationSpec {
     }
 }
 
-pub fn animation_system(
-    time: Res<Time>,
-    mut query: Query<(&AnimationSpec, &mut TextureAtlasSprite)>,
-) {
+pub fn animation_system(time: Res<Time>, mut query: Query<(&Animation, &mut TextureAtlasSprite)>) {
     let ms = time.time_since_startup().as_millis() as u64;
     for (anim, mut sprite) in query.iter_mut() {
         let passed = ms % anim.total_time as u64;

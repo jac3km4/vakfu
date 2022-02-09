@@ -6,11 +6,10 @@ use glam::const_vec2;
 use itertools::Itertools;
 
 use super::render::MapChunkView;
-use crate::map::animation::Animation;
 use crate::map::element::{ElementLibrary, MapElement};
 use crate::map::sprite::MapSprite;
 use crate::map::Map;
-use crate::systems::render::{AnimatedSpriteBundle, AnimationSpec};
+use crate::systems::render::{AnimatedSpriteBundle, Animation};
 
 pub fn setup_system(
     mut commands: Commands,
@@ -33,7 +32,10 @@ pub fn setup_system(
                 let texture = asset_server.load(&format!("gfx/{}.tgam", elem.texture_id));
 
                 let handle = atlas_cache.entry(elem.id).or_insert_with(|| {
-                    let rects = elem.animation.frame_rects();
+                    let rects = elem
+                        .animation
+                        .as_ref()
+                        .map(|frames| frames.frame_rects.as_slice());
                     let atlas =
                         new_atlas(texture, elem.image_size(), rects.unwrap_or(&[elem.rect()]));
                     atlases.add(atlas)
@@ -61,7 +63,7 @@ fn spawn_sprite(
     let visibility = Visibility { is_visible: false };
 
     match &element.animation {
-        Animation::Static => {
+        None => {
             let sprite = TextureAtlasSprite {
                 flip_x: element.flags.is_flip(),
                 color: sprite.color(),
@@ -77,13 +79,13 @@ fn spawn_sprite(
                 })
                 .id()
         }
-        Animation::Animated(frames) => {
+        Some(frames) => {
             let sprite = TextureAtlasSprite {
                 flip_x: element.flags.is_flip(),
                 color: sprite.color(),
                 ..Default::default()
             };
-            let animation = AnimationSpec::new(frames);
+            let animation = Animation::new(frames);
             commands
                 .spawn_bundle(AnimatedSpriteBundle {
                     sprite,
