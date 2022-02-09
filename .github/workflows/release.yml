@@ -1,7 +1,9 @@
 
-name: CI
+name: Release
 
-on: [push, pull_request]
+on:
+  release:
+    types: [created]
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,8 +28,12 @@ jobs:
           files: |
             ./target/release/vakfu.exe
           args: -fq
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+      - name: Upload the artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path: |
-            ./target/release/vakfu.exe
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./target/release/vakfu.exe
+          asset_name: vakfu.exe
+          asset_content_type: application/vnd.microsoft.portable-executable
