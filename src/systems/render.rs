@@ -83,9 +83,15 @@ impl Animation {
     }
 }
 
-pub fn animation_system(time: Res<Time>, mut query: Query<(&Animation, &mut TextureAtlasSprite)>) {
+pub fn animation_system(
+    time: Res<Time>,
+    mut query: Query<(&Animation, &mut TextureAtlasSprite, &Visibility)>,
+) {
     let ms = time.time_since_startup().as_millis() as u64;
-    for (anim, mut sprite) in query.iter_mut() {
+    for (anim, mut sprite, visibility) in query.iter_mut() {
+        if !visibility.is_visible {
+            continue;
+        }
         let passed = ms % anim.total_time as u64;
         let index = anim
             .frame_times
