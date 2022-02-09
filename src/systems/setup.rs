@@ -66,7 +66,7 @@ fn spawn_sprite(
         None => {
             let sprite = TextureAtlasSprite {
                 flip_x: element.flags.is_flip(),
-                color: sprite.color(),
+                color: sprite.color,
                 ..Default::default()
             };
             commands
@@ -82,7 +82,7 @@ fn spawn_sprite(
         Some(frames) => {
             let sprite = TextureAtlasSprite {
                 flip_x: element.flags.is_flip(),
-                color: sprite.color(),
+                color: sprite.color,
                 ..Default::default()
             };
             let animation = Animation::new(frames);

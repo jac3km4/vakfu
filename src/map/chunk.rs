@@ -1,4 +1,7 @@
-use byte::{BytesExt, TryRead};
+use std::borrow::Cow;
+
+use bevy::prelude::Color;
+use byte::{ctx::Bytes, BytesExt, TryRead};
 
 use super::sprite::MapSprite;
 
@@ -61,7 +64,7 @@ impl<'a> TryRead<'a> for MapChunk {
                         let group_id = group_ids[group_idx as usize];
                         let layer = layer_indexes[group_idx as usize];
                         let color_idx: u16 = bytes.read(offset)?;
-                        let colors = colors.table[color_idx as usize].clone();
+                        let color = colors.get(color_idx);
                         let element = MapSprite {
                             cell_x,
                             cell_y,
@@ -73,7 +76,7 @@ impl<'a> TryRead<'a> for MapChunk {
                             group_key,
                             group_id,
                             layer,
-                            colors,
+                            color,
                         };
                         sprites.push(element);
                     }
@@ -95,11 +98,30 @@ impl<'a> TryRead<'a> for MapChunk {
     }
 }
 
-struct Colors {
-    table: Vec<Vec<f32>>,
+struct Colors<'a> {
+    table: Vec<Cow<'a, [u8]>>,
 }
 
-impl<'a> TryRead<'a> for Colors {
+impl<'a> Colors<'a> {
+    fn get(&self, idx: u16) -> Color {
+        match self.table.get(idx as usize).map(|buf| &buf[..]) {
+            Some([r, g, b, a]) => Color::rgba_linear(
+                teint(i8::from_ne_bytes([*r])),
+                teint(i8::from_ne_bytes([*g])),
+                teint(i8::from_ne_bytes([*b])),
+                teint(i8::from_ne_bytes([*a])),
+            ),
+            Some([r, g, b]) => Color::rgb_linear(
+                teint(i8::from_ne_bytes([*r])),
+                teint(i8::from_ne_bytes([*g])),
+                teint(i8::from_ne_bytes([*b])),
+            ),
+            _ => Color::rgb_linear(0.5, 0.5, 0.5),
+        }
+    }
+}
+
+impl<'a> TryRead<'a> for Colors<'a> {
     fn try_read(bytes: &'a [u8], _ctx: ()) -> byte::Result<(Self, usize)> {
         let offset = &mut 0;
 
@@ -107,11 +129,8 @@ impl<'a> TryRead<'a> for Colors {
         let mut table = Vec::with_capacity(count as usize);
         for _ in 0..count as usize {
             let size = size_from_tag(bytes.read(offset)?);
-            let mut vec = Vec::with_capacity(size);
-            for _ in 0..size {
-                vec.push(teint(bytes.read(offset)?))
-            }
-            table.push(vec)
+            let bytes = bytes.read_with(offset, Bytes::Len(size))?;
+            table.push(Cow::Borrowed(bytes))
         }
         Ok((Colors { table }, *offset))
     }
@@ -124,6 +143,7 @@ fn size_from_tag(tag: u8) -> usize {
     (a + b) * c
 }
 
+#[inline]
 fn teint(v: i8) -> f32 {
     (v as f32 / 255.0f32) + 0.5f32
 }
