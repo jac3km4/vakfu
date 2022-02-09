@@ -18,7 +18,7 @@ impl MapChunkView {
     pub fn new(chunk: &MapChunk, children: Vec<Entity>) -> Self {
         let rect = Rect {
             min: iso_to_screen(IVec2::new(chunk.min_x, chunk.min_y), -Self::CHUNK_HEIGHT),
-            max: iso_to_screen(IVec2::new(chunk.max_x, chunk.max_y), 0),
+            max: iso_to_screen(IVec2::new(chunk.max_x, chunk.max_y), Self::CHUNK_HEIGHT),
         };
         Self {
             rect,
