@@ -24,13 +24,13 @@ pub fn camera_controller_system(
     for event in mouse_button_input_events.iter() {
         match event {
             MouseButtonInput {
-                button: MouseButton::Left,
+                button: MouseButton::Middle,
                 state: ElementState::Pressed,
             } => {
                 state.drag_start_position = Some(state.cursor_position);
             }
             MouseButtonInput {
-                button: MouseButton::Left,
+                button: MouseButton::Middle,
                 state: ElementState::Released,
             } => {
                 state.drag_start_position = None;

@@ -9,7 +9,9 @@ use super::render::MapChunkView;
 use crate::map::element::{ElementLibrary, MapElement};
 use crate::map::sprite::MapSprite;
 use crate::map::Map;
-use crate::systems::render::{AnimatedSpriteBundle, Animation};
+use crate::systems::render::{
+    AnimatedSpriteBundle, Animation, SpriteProperties, StaticSpriteBundle,
+};
 
 pub fn setup_system(
     mut commands: Commands,
@@ -29,6 +31,7 @@ pub fn setup_system(
         for sprite in &chunk.sprites {
             if let Some(elem) = library.get(sprite.element_id) {
                 let z_order = *z_orders.get(&sprite.hashcode()).unwrap();
+                let z_pos = z_order as f32 / z_orders.len() as f32;
                 let texture = asset_server.load(&format!("gfx/{}.tgam", elem.texture_id));
 
                 let handle = atlas_cache.entry(elem.id).or_insert_with(|| {
@@ -40,7 +43,7 @@ pub fn setup_system(
                         new_atlas(texture, elem.image_size(), rects.unwrap_or(&[elem.rect()]));
                     atlases.add(atlas)
                 });
-                let entity = spawn_sprite(&mut commands, sprite, elem, handle.clone(), z_order);
+                let entity = spawn_sprite(&mut commands, sprite, elem, handle.clone(), z_pos);
                 elements.push(entity);
             }
         }
@@ -61,6 +64,10 @@ fn spawn_sprite(
     let pos = sprite.screen_position() + (element.size() / 2. - element.origin()) * FLIP_Y;
     let transform = Transform::from_translation(pos.extend(z_order));
     let visibility = Visibility { is_visible: false };
+    let properties = SpriteProperties {
+        layer: sprite.layer,
+        group_key: sprite.group_key,
+    };
 
     match &element.animation {
         None => {
@@ -70,11 +77,12 @@ fn spawn_sprite(
                 ..Default::default()
             };
             commands
-                .spawn_bundle(SpriteSheetBundle {
+                .spawn_bundle(StaticSpriteBundle {
                     sprite,
                     texture_atlas,
                     transform,
                     visibility,
+                    properties,
                     ..Default::default()
                 })
                 .id()
@@ -93,6 +101,7 @@ fn spawn_sprite(
                     transform,
                     animation,
                     visibility,
+                    properties,
                     ..Default::default()
                 })
                 .id()
@@ -108,20 +117,14 @@ fn new_atlas(image: Handle<Image>, size: Vec2, rects: &[Rect]) -> TextureAtlas {
     atlas
 }
 
-fn compute_z_orders(map: &Map) -> HashMap<i64, f32> {
+fn compute_z_orders(map: &Map) -> HashMap<i64, usize> {
     // pre-calculate z-orders for the entire map
-    let hashcodes = map
-        .chunks()
+    map.chunks()
         .iter()
         .flat_map(|chunk| &chunk.sprites)
         .map(|sprite| sprite.hashcode())
         .sorted()
-        .collect_vec();
-    let hashcode_count = hashcodes.len();
-
-    hashcodes
-        .into_iter()
         .enumerate()
-        .map(|(idx, hashcode)| (hashcode, idx as f32 / hashcode_count as f32))
+        .map(|(idx, hashcode)| (hashcode, idx))
         .collect()
 }

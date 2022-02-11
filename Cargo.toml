@@ -17,7 +17,15 @@ default-features = false
 features = [ "deflate" ]
 
 [dependencies.bevy]
-git = "https://github.com/jac3km4/bevy.git"
-branch = "custom-blending"
+version = "0.6"
 default-features = false
 features = [ "bevy_winit", "render", "x11" ]
+
+[dependencies.bevy_egui]
+version = "0.11"
+default-features = false
+features = []
+
+[patch.crates-io.bevy]
+git = "https://github.com/jac3km4/bevy.git"
+branch = "custom-blending"

@@ -31,7 +31,7 @@ impl MapChunkView {
 pub fn map_chunk_view_system(
     windows: Res<Windows>,
     cameras: Query<&mut Transform, With<Camera>>,
-    mut sprites: Query<&mut Visibility>,
+    mut sprites: Query<&mut VisibilityFlags>,
     mut chunks: Query<&mut MapChunkView>,
 ) {
     let camera = cameras.single();
@@ -50,7 +50,7 @@ pub fn map_chunk_view_system(
         if chunk.previously_visible != visible {
             for entity in &chunk.children {
                 let mut vis = sprites.get_mut(*entity).unwrap();
-                vis.is_visible = visible;
+                vis.is_within_view = visible;
             }
 
             chunk.previously_visible = visible;
@@ -58,7 +58,47 @@ pub fn map_chunk_view_system(
     }
 }
 
-#[derive(Default, Bundle)]
+#[derive(Debug, Component)]
+pub struct VisibilityFlags {
+    pub is_within_view: bool,
+    pub is_active: bool,
+}
+
+impl Default for VisibilityFlags {
+    fn default() -> Self {
+        Self {
+            is_within_view: false,
+            is_active: true,
+        }
+    }
+}
+
+pub fn visibility_system(
+    mut query: Query<(&VisibilityFlags, &mut Visibility), Changed<VisibilityFlags>>,
+) {
+    for (props, mut visibility) in query.iter_mut() {
+        visibility.is_visible = props.is_active && props.is_within_view;
+    }
+}
+
+#[derive(Debug, Default, Component)]
+pub struct SpriteProperties {
+    pub layer: u8,
+    pub group_key: i32,
+}
+
+#[derive(Debug, Default, Bundle)]
+pub struct StaticSpriteBundle {
+    pub sprite: TextureAtlasSprite,
+    pub texture_atlas: Handle<TextureAtlas>,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub visibility: Visibility,
+    pub properties: SpriteProperties,
+    pub visibility_flags: VisibilityFlags,
+}
+
+#[derive(Debug, Default, Bundle)]
 pub struct AnimatedSpriteBundle {
     pub sprite: TextureAtlasSprite,
     pub texture_atlas: Handle<TextureAtlas>,
@@ -66,9 +106,11 @@ pub struct AnimatedSpriteBundle {
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub visibility: Visibility,
+    pub properties: SpriteProperties,
+    pub visibility_flags: VisibilityFlags,
 }
 
-#[derive(Default, Component)]
+#[derive(Debug, Default, Component)]
 pub struct Animation {
     total_time: u32,
     frame_times: Vec<u16>,
