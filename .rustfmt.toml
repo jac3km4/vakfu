@@ -1,0 +1,7 @@
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true
+overflow_delimited_expr = true
+group_imports = "StdExternalCrate"
+imports_layout = "Horizontal"
+imports_granularity = "Module"

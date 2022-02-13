@@ -10,7 +10,7 @@ use crate::map::element::{ElementLibrary, MapElement};
 use crate::map::sprite::MapSprite;
 use crate::map::Map;
 use crate::systems::render::{
-    AnimatedSpriteBundle, Animation, SpriteProperties, StaticSpriteBundle,
+    AnimatedSpriteBundle, Animation, SpriteProperties, StaticSpriteBundle
 };
 
 pub fn setup_system(

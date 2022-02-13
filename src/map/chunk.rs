@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use bevy::prelude::Color;
-use byte::{ctx::Bytes, BytesExt, TryRead};
+use byte::ctx::Bytes;
+use byte::{BytesExt, TryRead};
 
 use super::sprite::MapSprite;
 
