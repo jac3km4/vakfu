@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use bevy::sprite::Rect;
+use bevy::sprite::{Anchor, Rect};
 use glam::const_vec2;
 use itertools::Itertools;
 
@@ -61,38 +61,32 @@ fn spawn_sprite(
 ) -> Entity {
     const FLIP_Y: Vec2 = const_vec2!([1., -1.]);
     // size and origin need to be flipped in the Y dimension for rendering
-    let pos = sprite.screen_position() + (element.size() / 2. - element.origin()) * FLIP_Y;
+    let pos = sprite.screen_position() - element.origin() * FLIP_Y;
     let transform = Transform::from_translation(pos.extend(z_order));
     let visibility = Visibility { is_visible: false };
     let properties = SpriteProperties {
         layer: sprite.layer,
         group_key: sprite.group_key,
     };
+    let sprite = TextureAtlasSprite {
+        flip_x: element.flags.is_flip(),
+        color: sprite.color,
+        anchor: Anchor::TopLeft,
+        ..Default::default()
+    };
 
     match &element.animation {
-        None => {
-            let sprite = TextureAtlasSprite {
-                flip_x: element.flags.is_flip(),
-                color: sprite.color,
+        None => commands
+            .spawn_bundle(StaticSpriteBundle {
+                sprite,
+                texture_atlas,
+                transform,
+                visibility,
+                properties,
                 ..Default::default()
-            };
-            commands
-                .spawn_bundle(StaticSpriteBundle {
-                    sprite,
-                    texture_atlas,
-                    transform,
-                    visibility,
-                    properties,
-                    ..Default::default()
-                })
-                .id()
-        }
+            })
+            .id(),
         Some(frames) => {
-            let sprite = TextureAtlasSprite {
-                flip_x: element.flags.is_flip(),
-                color: sprite.color,
-                ..Default::default()
-            };
             let animation = Animation::new(frames);
             commands
                 .spawn_bundle(AnimatedSpriteBundle {
