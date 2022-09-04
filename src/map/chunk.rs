@@ -107,17 +107,17 @@ impl<'a> Colors<'a> {
     fn get(&self, idx: u16) -> Color {
         match self.table.get(idx as usize).map(|buf| &buf[..]) {
             Some([r, g, b, a]) => Color::rgba_linear(
-                teint(i8::from_ne_bytes([*r])),
-                teint(i8::from_ne_bytes([*g])),
-                teint(i8::from_ne_bytes([*b])),
+                teint(i8::from_ne_bytes([*r])) * 2.0,
+                teint(i8::from_ne_bytes([*g])) * 2.0,
+                teint(i8::from_ne_bytes([*b])) * 2.0,
                 teint(i8::from_ne_bytes([*a])),
             ),
             Some([r, g, b]) => Color::rgb_linear(
-                teint(i8::from_ne_bytes([*r])),
-                teint(i8::from_ne_bytes([*g])),
-                teint(i8::from_ne_bytes([*b])),
+                teint(i8::from_ne_bytes([*r])) * 2.0,
+                teint(i8::from_ne_bytes([*g])) * 2.0,
+                teint(i8::from_ne_bytes([*b])) * 2.0,
             ),
-            _ => Color::rgb_linear(0.5, 0.5, 0.5),
+            _ => Color::rgb_linear(1.0, 1.0, 1.0),
         }
     }
 }
