@@ -45,6 +45,10 @@ fn main() -> Result<()> {
             let map_index = map_ids.iter().position(|id| id == &map_arg);
 
             App::new()
+                .insert_resource(WindowDescriptor {
+                    title: format!("vakfu (Map id : {})", map_arg),
+                    ..default()
+                })
                 .add_plugins_with(DefaultPlugins, |group| {
                     group.add_before::<bevy::asset::AssetPlugin, _>(JarAssetIo::plugin(gfx_path))
                 })
