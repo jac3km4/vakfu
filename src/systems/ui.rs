@@ -56,6 +56,19 @@ pub fn ui_system(
                 };
             }
         });
+        ui.separator();
+        ui.label("Open specific map");
+        let map_list = egui::ScrollArea::vertical()
+            .max_height(200.0)
+            .auto_shrink([false; 2]);
+        map_list.show(ui, |ui| {
+            for map_id in &navigation.map_ids {
+                if ui.button(format!("{}", map_id)).clicked() {
+                    start_other_vakfu(map_id, &navigation.game_path);
+                    exit.send(AppExit);
+                };
+            }
+        });
     });
 
     if settings.as_ref() != &copy {
