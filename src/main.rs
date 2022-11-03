@@ -15,7 +15,7 @@ use systems::render::{animation_system, map_chunk_view_system, visibility_system
 use systems::settings::{settings_system, Settings};
 use systems::setup::setup_system;
 use systems::ui::ui_system;
-use utils::id::get_maps_id;
+use utils::id::get_map_ids;
 
 mod assets;
 mod map;
@@ -67,19 +67,17 @@ fn main() -> Result<()> {
 
             Ok(())
         }
-        Err(_e) => match _e {
-            Error::MissingOption(_) | Error::OptionWithoutAValue(_) => {
-                match get_maps_id(maps_path.join("gfx")) {
-                    Ok(maps_id) => Err(anyhow!(
-                        "Map isn't specified, following maps id are available :\n{:?}",
-                        maps_id
-                    )),
-                    Err(_e) => Err(anyhow!(
-                        "Map isn't specified, but no maps found in game_path specified."
-                    )),
-                }
+        Err(Error::MissingOption(_) | Error::OptionWithoutAValue(_)) => {
+            match get_map_ids(maps_path.join("gfx")) {
+                Ok(map_ids) => Err(anyhow!(
+                    "Map isn't specified, following map ids are available :\n{:?}",
+                    map_ids
+                )),
+                Err(_e) => Err(anyhow!(
+                    "Map isn't specified, but no map found in game_path specified."
+                )),
             }
-            _ => Err(anyhow!(_e)),
-        },
+        }
+        Err(_e) => Err(anyhow!(_e)),
     }
 }
