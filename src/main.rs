@@ -11,6 +11,7 @@ use map::element::ElementLibrary;
 use map::Map;
 use pico_args::{Arguments, Error};
 use systems::camera::{camera_controller_system, camera_system, CameraController};
+use systems::navigation::NavigationInfo;
 use systems::render::{animation_system, map_chunk_view_system, visibility_system};
 use systems::settings::{settings_system, Settings};
 use systems::setup::setup_system;
@@ -30,15 +31,24 @@ fn main() -> Result<()> {
     let maps_path = game_path.join("contents").join("maps");
     let gfx_path = maps_path.join("gfx.jar");
 
+    let base_map_gfx_path = maps_path.join("gfx");
+
     match pargs.value_from_str::<&str, i32>("--map") {
         Ok(map_arg) => {
-            let map_path = maps_path.join("gfx").join(format!("{}.jar", map_arg));
+            let map_path = base_map_gfx_path.join(format!("{}.jar", map_arg));
             let lib_path = maps_path.join("data.jar");
 
             let map = Map::load(File::open(map_path)?)?;
             let lib = ElementLibrary::load(File::open(lib_path)?)?;
 
+            let map_ids = get_map_ids(&base_map_gfx_path)?;
+            let map_index = map_ids.iter().position(|id| id == &map_arg);
+
             App::new()
+                .insert_resource(WindowDescriptor {
+                    title: format!("vakfu (Map id : {})", map_arg),
+                    ..default()
+                })
                 .add_plugins_with(DefaultPlugins, |group| {
                     group.add_before::<bevy::asset::AssetPlugin, _>(JarAssetIo::plugin(gfx_path))
                 })
@@ -47,6 +57,11 @@ fn main() -> Result<()> {
                 .add_plugin(FrameTimeDiagnosticsPlugin::default())
                 .init_asset_loader::<TgamLoader>()
                 .insert_resource(Settings::default())
+                .insert_resource(NavigationInfo {
+                    map_ids,
+                    current_index: map_index.unwrap(),
+                    game_path: game_path.clone(),
+                })
                 .insert_resource(CameraController::default())
                 .insert_resource(lib)
                 .insert_resource(map)
@@ -68,7 +83,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Err(Error::MissingOption(_) | Error::OptionWithoutAValue(_)) => {
-            match get_map_ids(maps_path.join("gfx")) {
+            match get_map_ids(&base_map_gfx_path) {
                 Ok(map_ids) => Err(anyhow!(
                     "Map isn't specified, following map ids are available :\n{:?}",
                     map_ids
