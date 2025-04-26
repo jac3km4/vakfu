@@ -10,7 +10,7 @@ use crate::map::element::{ElementLibrary, MapElement};
 use crate::map::sprite::MapSprite;
 use crate::map::Map;
 use crate::systems::render::{
-    AnimatedSpriteBundle, Animation, SpriteProperties, StaticSpriteBundle
+    AnimatedSpriteBundle, Animation, SpriteProperties, StaticSpriteBundle,
 };
 
 pub fn setup_system(
@@ -62,7 +62,8 @@ fn spawn_sprite(
     const FLIP_Y: Vec2 = const_vec2!([1., -1.]);
     // size and origin need to be flipped in the Y dimension for rendering
     let pos = sprite.screen_position() - element.origin() * FLIP_Y;
-    let transform = Transform::from_translation(pos.extend(z_order));
+    let transform =
+        Transform::from_translation(pos.extend(z_order)).with_scale(element.scale().extend(1.));
     let visibility = Visibility { is_visible: false };
     let properties = SpriteProperties {
         layer: sprite.layer,
