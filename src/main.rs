@@ -1,83 +1,102 @@
+use std::fs;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use assets::jar::JarAssetIo;
-use assets::tgam::TgamLoader;
-use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+use anyhow::bail;
+use assets::{JarAssetSource, Map, MapSpriteLibrary, TgamLoader};
+use bevy::asset::io::AssetSourceBuilder;
 use bevy::prelude::*;
-use bevy_egui::EguiPlugin;
-use map::element::ElementLibrary;
-use map::Map;
-use pico_args::{Arguments, Error};
-use systems::camera::{camera_controller_system, camera_system, CameraController};
-use systems::render::{animation_system, map_chunk_view_system, visibility_system};
-use systems::settings::{settings_system, Settings};
-use systems::setup::setup_system;
-use systems::ui::ui_system;
-use utils::id::get_map_ids;
+use bevy::window::PrimaryWindow;
+use bevy_egui::{EguiContextPass, EguiPlugin};
+use camera::{CameraController, camera_controller_system, camera_system};
+use pico_args::Arguments;
+use render::{MapRenderer, animation_system, rendering_system};
+use settings::{MapViewSettings, settings_ui_system};
 
+#[allow(unused)]
 mod assets;
-mod map;
-mod systems;
-mod utils;
+mod camera;
+mod render;
+mod settings;
+mod util;
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut pargs = Arguments::from_env();
 
     let game_path: PathBuf = pargs.value_from_str("--path")?;
-
     let maps_path = game_path.join("contents").join("maps");
-    let gfx_path = maps_path.join("gfx.jar");
 
-    match pargs.value_from_str::<&str, i32>("--map") {
-        Ok(map_arg) => {
-            let map_path = maps_path.join("gfx").join(format!("{}.jar", map_arg));
-            let lib_path = maps_path.join("data.jar");
+    let map_id = match pargs.value_from_str::<&str, i32>("--map") {
+        Ok(id) => id,
+        Err(err) => match get_map_list(&maps_path) {
+            Ok(map_ids) => bail!(
+                "no map specified ({err}), you can try one of the following:\n{}",
+                map_ids.join(", ")
+            ),
+            Err(_) => bail!("no map specified ({err}) and could not find anyh"),
+        },
+    };
 
-            let map = Map::load(File::open(map_path)?)?;
-            let lib = ElementLibrary::load(File::open(lib_path)?)?;
+    let asset_source = JarAssetSource::new(maps_path.join("gfx.jar"))?;
+    let renderer = load_renderer(&maps_path, map_id)?;
 
-            App::new()
-                .add_plugins_with(DefaultPlugins, |group| {
-                    group.add_before::<bevy::asset::AssetPlugin, _>(JarAssetIo::plugin(gfx_path))
-                })
-                .add_plugin(EguiPlugin)
-                .add_plugin(LogDiagnosticsPlugin::default())
-                .add_plugin(FrameTimeDiagnosticsPlugin::default())
-                .init_asset_loader::<TgamLoader>()
-                .insert_resource(Settings::default())
-                .insert_resource(CameraController::default())
-                .insert_resource(lib)
-                .insert_resource(map)
-                .add_startup_system(setup_system)
-                .add_system(settings_system.label("settings"))
-                .add_system(ui_system.label("ui"))
-                .add_system(camera_controller_system.label("camera_control"))
-                .add_system(camera_system.label("camera").after("camera_control"))
-                .add_system(map_chunk_view_system.label("chunk_view").after("camera"))
-                .add_system(
-                    visibility_system
-                        .label("visibility")
-                        .after("chunk_view")
-                        .after("settings"),
-                )
-                .add_system(animation_system.label("animation").after("visibility"))
-                .run();
+    App::new()
+        .register_asset_source(
+            "gfx",
+            AssetSourceBuilder::default().with_reader(move || Box::new(asset_source.clone())),
+        )
+        .add_plugins(DefaultPlugins)
+        .add_plugins(EguiPlugin {
+            enable_multipass_for_primary_context: true,
+        })
+        .init_asset_loader::<TgamLoader>()
+        .insert_resource(renderer)
+        .insert_resource(CameraController::default())
+        .init_resource::<MapViewSettings>()
+        .add_systems(Startup, setup)
+        .add_systems(
+            EguiContextPass,
+            settings_ui_system.run_if(egui_has_primary_context),
+        )
+        .add_systems(
+            Update,
+            (
+                (camera_controller_system, camera_system, rendering_system).chain(),
+                animation_system,
+            ),
+        )
+        .run();
 
-            Ok(())
-        }
-        Err(Error::MissingOption(_) | Error::OptionWithoutAValue(_)) => {
-            match get_map_ids(maps_path.join("gfx")) {
-                Ok(map_ids) => Err(anyhow!(
-                    "Map isn't specified, following map ids are available :\n{:?}",
-                    map_ids
-                )),
-                Err(_e) => Err(anyhow!(
-                    "Map isn't specified, but no map found in game_path specified."
-                )),
-            }
-        }
-        Err(_e) => Err(anyhow!(_e)),
-    }
+    Ok(())
+}
+
+fn load_renderer(maps_path: &Path, map_id: i32) -> anyhow::Result<MapRenderer> {
+    let map_path = maps_path.join("gfx").join(format!("{}.jar", map_id));
+    let lib_path = maps_path.join("data.jar");
+
+    let map = Map::load(File::open(map_path)?)?;
+    let sprites = MapSpriteLibrary::load(File::open(lib_path)?)?;
+    Ok(MapRenderer::new(&map, &sprites))
+}
+
+fn setup(mut commands: Commands<'_, '_>) {
+    commands.spawn(Camera2d);
+}
+
+fn egui_has_primary_context(
+    query: Query<'_, '_, &bevy_egui::EguiContext, With<PrimaryWindow>>,
+) -> bool {
+    !query.is_empty()
+}
+
+fn get_map_list(maps_path: &Path) -> Result<Vec<String>> {
+    let mut map_ids: Vec<String> = fs::read_dir(maps_path.join("gfx"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|entry| entry.extension() == Some("jar".as_ref()))
+        .filter_map(|entry| Some(entry.file_stem()?.to_str()?.to_owned()))
+        .collect();
+    map_ids.sort();
+
+    Ok(map_ids)
 }

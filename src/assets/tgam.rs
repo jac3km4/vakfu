@@ -1,24 +1,19 @@
-use std::borrow::Cow;
-
-use anyhow::anyhow;
-use bevy::asset::{AssetLoader, BoxedFuture, LoadContext, LoadedAsset};
-use bevy::prelude::Image;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use byte::ctx::Bytes;
+use byte::ctx::{Endianess, Len};
 use byte::{BytesExt, TryRead};
 
 #[derive(Debug)]
 pub struct Tgam<'a> {
     width: u16,
     height: u16,
-    bytes: Cow<'a, [u8]>,
-    mask: AlphaMask<'a>,
+    rgba: &'a [u8],
+    mask: &'a [u8],
+    mask_resize: u8,
 }
 
 impl<'a> Tgam<'a> {
     #[inline]
-    pub fn bytes(&'a self) -> &'a [u8] {
-        &self.bytes
+    pub fn rgba(&self) -> &'a [u8] {
+        self.rgba
     }
 
     #[inline]
@@ -32,81 +27,43 @@ impl<'a> Tgam<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for Tgam<'a> {
-    fn try_read(bytes: &'a [u8], _ctx: ()) -> byte::Result<(Self, usize)> {
+impl<'a, C: Copy + Endianess> TryRead<'a, C> for Tgam<'a> {
+    fn try_read(bytes: &'a [u8], ctx: C) -> byte::Result<(Self, usize)> {
         let offset = &mut 0;
 
-        let resize_mask: u8 = bytes.read(offset)?;
-        let header: &'a [u8] = bytes.read_with(offset, Bytes::Len(3))?;
-        if header != b"AGT" {
-            let err = "Invalid TGAM header";
-            return Err(byte::Error::BadInput { err });
+        let resize_mask: u8 = bytes.read(offset, ctx)?;
+        let header: [u8; 3] = bytes.read(offset, ctx)?;
+        if &header != b"AGT" {
+            return Err(byte::Error::BadInput {
+                err: "invalid TGA header",
+            });
         }
 
-        let width: u16 = bytes.read(offset)?;
-        let height: u16 = bytes.read(offset)?;
-        let tga_size: u32 = bytes.read(offset)?;
-        let mask_size: u32 = bytes.read(offset)?;
-        let mask_resize: u8 = if resize_mask == 109 {
-            bytes.read(offset)?
+        let width: u16 = bytes.read(offset, ctx)?;
+        let height: u16 = bytes.read(offset, ctx)?;
+
+        let rgba_size: u32 = bytes.read(offset, ctx)?;
+        let mask_size: u32 = bytes.read(offset, ctx)?;
+
+        let mask_resize: u8 = if resize_mask == 0x6D {
+            bytes.read(offset, ctx)?
         } else {
             1
         };
-        let tga_bytes: &[u8] = bytes.read_with(offset, Bytes::Len(tga_size as usize))?;
-        let mask_bytes: &[u8] = bytes.read_with(offset, Bytes::Len(mask_size as usize))?;
 
-        let mask = AlphaMask {
-            bytes: Cow::Borrowed(mask_bytes),
-            resize: mask_resize,
-        };
+        let rgba = bytes.read(offset, Len(rgba_size as usize))?;
+        let mask = bytes.read(offset, Len(mask_size as usize))?;
 
-        let tgam = Tgam {
-            width,
-            height,
-            bytes: Cow::Borrowed(tga_bytes),
-            mask,
-        };
-        Ok((tgam, *offset))
-    }
-}
-
-#[derive(Debug)]
-pub struct AlphaMask<'a> {
-    bytes: Cow<'a, [u8]>,
-    resize: u8,
-}
-
-#[derive(Default)]
-pub struct TgamLoader;
-
-impl AssetLoader for TgamLoader {
-    fn load<'a>(
-        &'a self,
-        bytes: &'a [u8],
-        load_context: &'a mut LoadContext,
-    ) -> BoxedFuture<'a, anyhow::Result<()>> {
-        Box::pin(async {
-            let tgam: Tgam = bytes
-                .read(&mut 0)
-                .map_err(|err| anyhow!("Failed to read TGAM: {:?}", err))?;
-            let extent = Extent3d {
-                width: tgam.width(),
-                height: tgam.height(),
-                depth_or_array_layers: 1,
-            };
-            let img = Image::new(
-                extent,
-                TextureDimension::D2,
-                tgam.bytes.to_vec(),
-                TextureFormat::Rgba8Unorm,
-            );
-            load_context.set_default_asset(LoadedAsset::new(img));
-            Ok(())
-        })
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &["tgam"]
+        Ok((
+            Self {
+                width,
+                height,
+                rgba,
+                mask,
+                mask_resize,
+            },
+            *offset,
+        ))
     }
 }
 

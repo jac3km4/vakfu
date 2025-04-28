@@ -1,4 +1,3 @@
-
 name: Release
 
 on:
@@ -12,17 +11,11 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          default: true
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
-      - uses: crazy-max/ghaction-upx@v1
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - uses: crazy-max/ghaction-upx@v3
         with:
           version: latest
           files: |
