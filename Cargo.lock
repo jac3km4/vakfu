@@ -4056,8 +4056,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "vakfu-new"
-version = "0.1.0"
+name = "vakfu"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "bevy",
