@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1"
 thiserror = "2"
 pico-args = "0.5"
-bitfield-struct = "0.10"
+bitfield-struct = "0.11"
 hashbrown = "0.15"
 rstar = "0.12"
 
@@ -34,7 +34,7 @@ default-features = false
 features = ["default_fonts", "render"]
 
 [dependencies.zip]
-version = "2"
+version = "4"
 default-features = false
 features = ["deflate"]
 
@@ -80,60 +80,60 @@ panic = "abort"
 # using a custom branch in order to use premultiplied alpha
 [patch.crates-io.bevy]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_app]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_asset]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_derive]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_ecs]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_image]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_input]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_log]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_math]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_platform]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_reflect]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_render]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_time]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_window]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
 
 [patch.crates-io.bevy_winit]
 git = "https://github.com/jac3km4/bevy.git"
-branch = "premultiplied-alpha"
+branch = "premult-alpha"
