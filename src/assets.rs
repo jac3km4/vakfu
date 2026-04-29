@@ -87,7 +87,7 @@ impl ErasedAssetReader for JarAssetSource {
                         std::io::ErrorKind::NotFound,
                         format!("'{}' not found ({err})", path.display()),
                     ),
-                    _ => std::io::Error::new(std::io::ErrorKind::Other, err),
+                    _ => std::io::Error::other(err),
                 })?;
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes)?;
