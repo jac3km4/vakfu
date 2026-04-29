@@ -105,3 +105,7 @@ The current Rust implementation provides basic map loading and rendering but lac
 7. **Shaders**: The target engine can specify a shader ID per element. The Rust version ignores this flag.
 8. **Visibility Masks**: The target engine supports elements with visibility masks.
 9. **Animated specificities**: The target engine seems to support texture coordinates variations for animations, the Rust one uses Bevy's atlas rendering which works differently.
+10. **Render Tree and Stencils**: The target engine uses a specialized `RenderTree` and `RenderTreeStencil` for rendering ordering, multi-cell elements, and handling mask overlays using Stencil buffers, missing in Rust.
+11. **Camera Masking**: The target engine supports tracking elements and applying camera mask keys and group limits based on the camera view.
+12. **Picking**: The target engine implements an `ElementPicker` using hit testing for elements selection which is unimplemented in the Rust version.
+13. **Daylight and Scripted Lighting**: The target engine features `DayLightDefinitionManager` for day percentage color gradients and `ScriptedLightModifier` to programmatically mutate scene colors in real-time.
