@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libasound2-dev libudev-dev pkg-config
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component clippy --no-self-update
       - name: Run clippy
