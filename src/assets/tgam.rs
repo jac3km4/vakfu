@@ -1,6 +1,7 @@
 use byte::ctx::{Endianess, Len};
 use byte::{BytesExt, TryRead};
 
+/// Represents an image loaded from a TGAM format.
 #[derive(Debug)]
 pub struct Tgam<'a> {
     width: u16,
@@ -11,16 +12,19 @@ pub struct Tgam<'a> {
 }
 
 impl<'a> Tgam<'a> {
+    /// Returns the RGBA pixel data of the image.
     #[inline]
     pub fn rgba(&self) -> &'a [u8] {
         self.rgba
     }
 
+    /// Returns the width of the image, rounded up to the nearest power of two.
     #[inline]
     pub fn width(&self) -> u32 {
         round_up_to_power_of_two(self.width.into())
     }
 
+    /// Returns the height of the image, rounded up to the nearest power of two.
     #[inline]
     pub fn height(&self) -> u32 {
         round_up_to_power_of_two(self.height.into())

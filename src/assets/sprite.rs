@@ -10,6 +10,7 @@ use hashbrown::HashMap;
 
 use super::AssetError;
 
+/// Defines the properties of a map sprite.
 #[derive(Debug, TryRead)]
 pub struct MapSpriteDefinition {
     id: i32,
@@ -32,31 +33,45 @@ pub struct MapSpriteDefinition {
 }
 
 impl MapSpriteDefinition {
+    /// Returns the original coordinates `(x, y)` of the sprite.
     pub fn origin(&self) -> (i16, i16) {
         (self.origin_x, self.origin_y)
     }
 
+    /// Returns the dimensions of the texture.
     pub fn texture_size(&self) -> (u16, u16) {
         (self.texture_width, self.texture_height)
     }
 
+    /// Returns the ID of the texture.
     pub fn texture_id(&self) -> i32 {
         self.texture_id
     }
 
+    /// Returns the flags associated with the sprite.
     pub fn flags(&self) -> SpriteFlags {
         self.flags
     }
 
+    /// Returns the dimensions of the rendered sprite.
     pub fn size(&self) -> (u16, u16) {
         (self.render_width, self.render_height)
     }
 
+    /// Returns the animation data for the sprite, if any.
     pub fn animation(&self) -> Animation {
         self.animation.clone()
     }
 }
 
+/// Flags dictating the behavior and properties of a sprite.
+/// These represent various boolean properties and a 4-bit slope value.
+/// Specifically:
+/// - `slope`: 4 bits representing the slope of the terrain block.
+/// - `is_flip`: Represents if the texture is horizontally flipped.
+/// - `is_move_top`: Represents if the element should be moved to the top layer.
+/// - `is_before_mobile`: Represents if the element should be drawn before mobile entities.
+/// - `is_walkable`: Represents if the cell containing this element is walkable.
 #[bitfield(u8)]
 pub struct SpriteFlags {
     #[bits(4)]
@@ -74,6 +89,7 @@ impl<C> TryRead<'_, C> for SpriteFlags {
     }
 }
 
+/// An animation defined for a sprite.
 #[derive(Debug, Clone)]
 pub enum Animation {
     None,
@@ -90,6 +106,7 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Animation {
     }
 }
 
+/// The frames constituting an animation.
 #[derive(Debug, Default)]
 pub struct Frames {
     total_time: u32,
@@ -102,18 +119,22 @@ pub struct Frames {
 }
 
 impl Frames {
+    /// Returns the total duration of the animation.
     pub fn total_time(&self) -> u32 {
         self.total_time
     }
 
+    /// Returns the width of a frame.
     pub fn width(&self) -> u16 {
         self.width
     }
 
+    /// Returns the height of a frame.
     pub fn height(&self) -> u16 {
         self.height
     }
 
+    /// Returns an iterator over the individual frames.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Frame> {
         let mut time = 0;
         self.frame_durations
@@ -160,6 +181,7 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {
     }
 }
 
+/// A single frame of an animation.
 #[derive(Debug)]
 pub struct Frame {
     pub time: u16,
@@ -167,12 +189,14 @@ pub struct Frame {
     pub y: u16,
 }
 
+/// A library of map sprite definitions.
 #[derive(Debug)]
 pub struct MapSpriteLibrary {
     elements: HashMap<i32, MapSpriteDefinition>,
 }
 
 impl MapSpriteLibrary {
+    /// Loads a library from a zip archive.
     pub fn load<R: Seek + Read>(input: R) -> Result<Self, AssetError> {
         let mut archive = zip::ZipArchive::new(input)?;
         let mut entry = archive.by_name("elements.lib")?;

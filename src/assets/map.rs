@@ -10,12 +10,14 @@ const CELL_WIDTH: i32 = 86;
 const CELL_HEIGHT: i32 = 43;
 const ELEVATION_UNIT: i32 = 10;
 
+/// A map, consisting of multiple chunks.
 #[derive(Debug)]
 pub struct Map {
     chunks: Vec<MapChunk>,
 }
 
 impl Map {
+    /// Loads a map from a zip archive containing chunk files.
     pub fn load<R: Read + Seek>(input: R) -> Result<Map, AssetError> {
         let mut archive = zip::ZipArchive::new(input)?;
         let mut chunks = Vec::with_capacity(archive.len());
@@ -37,11 +39,13 @@ impl Map {
         Ok(Map { chunks })
     }
 
+    /// Returns the chunks of the map.
     pub fn chunks(&self) -> &[MapChunk] {
         &self.chunks
     }
 }
 
+/// A single chunk of a map.
 #[derive(Debug, TryRead)]
 pub struct MapChunk {
     min_x: i32,
@@ -63,6 +67,7 @@ pub struct MapChunk {
 }
 
 impl MapChunk {
+    /// Returns an iterator over the elements in the chunk.
     pub fn elements(&self) -> impl Iterator<Item = MapElementDetails<'_>> {
         self.sub_chunks.iter().flat_map(move |sub| {
             let row_size = i32::from(sub.max_y - sub.min_y);
@@ -97,6 +102,7 @@ struct MapCell {
     elements: Vec<MapSrite>,
 }
 
+/// A group of map elements.
 #[derive(Debug, TryRead)]
 pub struct Group {
     key: i32,
@@ -105,10 +111,12 @@ pub struct Group {
 }
 
 impl Group {
+    /// Returns the group's key.
     pub fn key(&self) -> i32 {
         self.key
     }
 
+    /// Returns the layer index of the group.
     pub fn layer(&self) -> u8 {
         self.layer
     }
@@ -125,6 +133,7 @@ struct MapSrite {
     color_index: u16,
 }
 
+/// An RGB color definition.
 #[derive(Debug, Default, Clone, Copy, TryRead)]
 pub struct Rgb {
     r: i8,
@@ -132,6 +141,7 @@ pub struct Rgb {
     b: i8,
 }
 
+/// An RGBA color definition.
 #[derive(Debug, Default, Clone, Copy, TryRead)]
 pub struct Rgba {
     r: i8,
@@ -141,6 +151,7 @@ pub struct Rgba {
 }
 
 impl Rgba {
+    /// Converts the color to an array of 4 `f32` values.
     pub fn to_f32_array(self) -> [f32; 4] {
         [
             (self.r as f32 / 255. + 0.5) * 2.,
@@ -162,6 +173,12 @@ impl From<Rgb> for Rgba {
     }
 }
 
+/// A color applied to a map element.
+///
+/// The tags encode the presence of specific color components as bit flags:
+/// - `0x1` (bit 0): Indicates the presence of an RGB tint.
+/// - `0x2` (bit 1): Indicates the presence of an Alpha channel.
+/// - `0x4` (bit 2): Indicates the presence of a color gradient (requiring two color values).
 #[derive(Debug, Clone, Copy, TryRead)]
 #[byte(tag_type = u8)]
 pub enum Color {
@@ -189,6 +206,7 @@ impl From<Color> for Rgba {
     }
 }
 
+/// Details about a specific map element.
 #[derive(Debug)]
 pub struct MapElementDetails<'a> {
     cell_x: i32,
@@ -198,27 +216,34 @@ pub struct MapElementDetails<'a> {
 }
 
 impl<'a> MapElementDetails<'a> {
+    /// Returns the tag of the element.
     pub fn tag(&self) -> u8 {
         self.element.tag
     }
 
+    /// Returns the definition ID of the element.
     pub fn definition_id(&self) -> i32 {
         self.element.definition_id
     }
 
+    /// Returns the group this element belongs to.
     pub fn group(&self) -> &'a Group {
         &self.chunk.groups[self.element.group_index as usize]
     }
 
+    /// Returns the color of the element.
     pub fn color(&self) -> Color {
         self.chunk.colors[self.element.color_index as usize]
     }
 
+    /// Computes the screen position of the element.
     pub fn screen_position(&self) -> (f32, f32) {
         let height = i32::from(self.element.cell_z) - i32::from(self.element.height);
         iso_to_screen(self.cell_x, self.cell_y, height)
     }
 
+    /// Computes the hashcode used primarily for determining rendering depth order (z-sorting).
+    /// It relies on cell coordinates (`x` and `y`) along with the element's `altitude_order`.
     pub fn hashcode(&self) -> i64 {
         (self.element.altitude_order as i64 & 0x1FFFi64) << 6i64
             | ((self.cell_x as i64 + 8192i64) & 0x3FFFi64) << 19i64
@@ -226,6 +251,11 @@ impl<'a> MapElementDetails<'a> {
     }
 }
 
+/// Converts isometric coordinates `(x, y)` and `height` to screen coordinates.
+///
+/// This transformation uses specific scaling factors:
+/// - A cell width of 86 units and cell height of 43 units.
+/// - An elevation unit multiplier of 10 for the `height` coordinate.
 pub fn iso_to_screen(x: i32, y: i32, height: i32) -> (f32, f32) {
     let fx = ((x - y) * CELL_WIDTH) as f32 / 2.;
     let fy = ((-(x + y) * CELL_HEIGHT) as f32 / 2.) + (height * ELEVATION_UNIT) as f32;
