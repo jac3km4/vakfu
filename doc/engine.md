@@ -13,7 +13,7 @@ Maps are organized in a file based hierarchy.
 
 ### Rendering
 
-The engine renders maps composed of isometric elements (`ScreenElement`). Each element belongs to a cell coordinate (X, Y) and altitude (Z).
+The engine renders maps composed of isometric elements. Each element belongs to a cell coordinate (X, Y) and altitude (Z).
 
 Features:
 - Z-order sorting
@@ -36,7 +36,7 @@ The engine relies on a custom binary format for maps and map elements.
 
 #### Map File Format
 
-The map file stores multiple chunks (ScreenMap).
+The map file stores multiple chunks.
 
 A Map chunk has:
 - Coordinates bounds (MinX, MinY, MinZ, MaxX, MaxY, MaxZ)
@@ -96,16 +96,16 @@ The current Rust implementation provides basic map loading and rendering but lac
 
 ### Missing Features
 
-1. **Occluders and Clipping**: The target engine has an optimization using occluders and clipping (`m_isClipped`). This is completely missing in Rust.
+1. **Occluders and Clipping**: The target engine has an optimization using occluders and clipping flags. This is completely missing in Rust.
 2. **Hidden Element / HighLight Fades**: The target engine supports applying colors based on highlight fades and layer fades.
 3. **Lighting**: The target engine supports applying specific lighting colors per sprite, substituting material properties dynamically.
-4. **Hit Testing / Masking**: The target engine provides `fineHitTest`, evaluating exact pixel locations against alpha masks. Tgam parsing in Rust currently extracts the mask, but it is not used in rendering or interactions.
+4. **Hit Testing / Masking**: The target engine provides precise hit testing, evaluating exact pixel locations against alpha masks. Texture mask parsing in Rust currently extracts the mask, but it is not used in rendering or interactions.
 5. **Slope / Height Processing**: The target engine computes specific transforms when highlighting based on the slope mask and visual height.
 6. **Ground Sound Type**: Extracted in the target engine, missing in Rust.
 7. **Shaders**: The target engine can specify a shader ID per element. The Rust version ignores this flag.
 8. **Visibility Masks**: The target engine supports elements with visibility masks.
-9. **Animated specificities**: The target engine seems to support texture coordinates variations for animations, the Rust one uses Bevy's atlas rendering which works differently.
-10. **Render Tree and Stencils**: The target engine uses a specialized `RenderTree` and `RenderTreeStencil` for rendering ordering, multi-cell elements, and handling mask overlays using Stencil buffers, missing in Rust.
+9. **Animated specificities**: The target engine seems to support texture coordinates variations for animations, the Rust one uses standard atlas rendering which works differently.
+10. **Render Tree and Stencils**: The target engine uses a specialized rendering tree structure for rendering ordering, multi-cell elements, and handling mask overlays using Stencil buffers, missing in Rust.
 11. **Camera Masking**: The target engine supports tracking elements and applying camera mask keys and group limits based on the camera view.
-12. **Picking**: The target engine implements an `ElementPicker` using hit testing for elements selection which is unimplemented in the Rust version.
-13. **Daylight and Scripted Lighting**: The target engine features `DayLightDefinitionManager` for day percentage color gradients and `ScriptedLightModifier` to programmatically mutate scene colors in real-time.
+12. **Picking**: The target engine implements picking using hit testing for elements selection which is unimplemented in the Rust version.
+13. **Daylight and Scripted Lighting**: The target engine features managers for day percentage color gradients and scripted modifiers to programmatically mutate scene colors in real-time.
