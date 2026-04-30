@@ -17,7 +17,7 @@ pub struct MapRenderer {
 }
 
 impl MapRenderer {
-    pub fn new(map: &Map, sprites: &MapSpriteLibrary) -> Self {
+    pub fn new(map: &Map, sprites: &MapSpriteLibrary, light_map: &crate::assets::LightMap) -> Self {
         let mut elements = map
             .chunks()
             .iter()
@@ -40,11 +40,22 @@ impl MapRenderer {
                 let (width, height) = def.size();
                 let (texture_width, texture_height) = def.texture_size();
 
+                let light_def = light_map.get_color(elem.cell_x(), elem.cell_y(), elem.group().layer() as i32);
+                let rgba: crate::assets::Rgba = elem.color().into();
+                let [r, g, b, a] = rgba.to_f32_array();
+                let color_tinted = crate::assets::Rgba::new(
+                    r * light_def.ambiance_light[0],
+                    g * light_def.ambiance_light[1],
+                    b * light_def.ambiance_light[2],
+                    a,
+                );
+
                 Renderable {
                     position: Vec3::new(x, y, z),
                     texture_size: UVec2::new(width.into(), height.into()),
                     render_size: UVec2::new(texture_width.into(), texture_height.into()),
                     color: elem.color().into(),
+                    color_tinted,
                     texture_id: def.texture_id(),
                     flip_x: def.flags().is_flip(),
                     animation: def.animation(),
@@ -69,6 +80,7 @@ struct Renderable {
     texture_size: UVec2,
     render_size: UVec2,
     color: Rgba,
+    color_tinted: Rgba,
     texture_id: i32,
     flip_x: bool,
     animation: Animation,
@@ -98,6 +110,7 @@ pub struct AnimationState {
     frames: Arc<Frames>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn rendering_system(
     mut commands: Commands<'_, '_>,
     assets: Res<'_, AssetServer>,
@@ -106,6 +119,7 @@ pub fn rendering_system(
     mut atlas_layouts: ResMut<'_, Assets<TextureAtlasLayout>>,
     mut render_state: ResMut<'_, MapRenderer>,
     settings: Res<'_, MapViewSettings>,
+    mut sprites: Query<'_, '_, &mut Sprite>,
 ) -> Result {
     let Ok(camera) = cameras.single() else {
         return Ok(());
@@ -131,9 +145,16 @@ pub fn rendering_system(
         }
 
         let entity = match elem.id {
-            Some(id) if commands.get_entity(id).is_ok() => id,
+            Some(id) if commands.get_entity(id).is_ok() => {
+                if let Ok(mut sprite) = sprites.get_mut(id) {
+                    let active_color = if settings.enable_light { elem.color_tinted } else { elem.color };
+                    let [r, g, b, a] = active_color.to_f32_array();
+                    sprite.color = Color::linear_rgba(r, g, b, a);
+                }
+                id
+            },
             _ => {
-                let entity = render(&mut commands, &assets, &mut atlas_layouts, elem);
+                let entity = render(&mut commands, &assets, &mut atlas_layouts, elem, settings.enable_light);
                 elem.id = Some(entity);
                 entity
             }
@@ -178,6 +199,7 @@ fn render(
     assets: &Res<'_, AssetServer>,
     atlas_layouts: &mut ResMut<'_, Assets<TextureAtlasLayout>>,
     renderable: &Renderable,
+    enable_light: bool,
 ) -> Entity {
     let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", renderable.texture_id));
 
@@ -203,7 +225,8 @@ fn render(
     let layout = atlas_layouts.add(layout);
 
     let mut sprite = Sprite::from_atlas_image(img, layout.into());
-    let [r, g, b, a] = renderable.color.to_f32_array();
+    let active_color = if enable_light { renderable.color_tinted } else { renderable.color };
+    let [r, g, b, a] = active_color.to_f32_array();
     sprite.color = Color::linear_rgba(r, g, b, a);
     sprite.flip_x = renderable.flip_x;
     sprite.custom_size = Some(renderable.render_size.as_vec2());

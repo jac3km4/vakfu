@@ -189,6 +189,15 @@ pub struct Rgba {
 }
 
 impl Rgba {
+    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self {
+            r: ((r / 2. - 0.5) * 255.) as i8,
+            g: ((g / 2. - 0.5) * 255.) as i8,
+            b: ((b / 2. - 0.5) * 255.) as i8,
+            a: ((a / 2. - 0.5) * 255.) as i8,
+        }
+    }
+
     /// Converts the color to an array of 4 `f32` values.
     pub fn to_f32_array(self) -> [f32; 4] {
         [
@@ -291,6 +300,8 @@ impl<'a> MapElementDetails<'a> {
 
     /// Computes the hashcode used primarily for determining rendering depth order (z-sorting).
     /// It relies on cell coordinates (`x` and `y`) along with the element's `altitude_order`.
+    pub fn cell_x(&self) -> i32 { self.cell_x }
+    pub fn cell_y(&self) -> i32 { self.cell_y }
     pub fn hashcode(&self) -> i64 {
         (self.element.altitude_order as i64 & 0x1FFFi64) << 6i64
             | ((self.cell_x as i64 + 8192i64) & 0x3FFFi64) << 19i64
@@ -299,7 +310,7 @@ impl<'a> MapElementDetails<'a> {
 }
 
 /// Converts isometric coordinates `(x, y)` and `height` to screen coordinates.
-/// 
+///
 /// This transformation uses specific scaling factors:
 /// - A cell width of 86 units and cell height of 43 units.
 /// - An elevation unit multiplier of 10 for the `height` coordinate.

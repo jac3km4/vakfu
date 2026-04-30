@@ -3,7 +3,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
-use assets::{JarAssetSource, Map, MapSpriteLibrary, TgamLoader};
+use assets::{JarAssetSource, LightMap, Map, MapSpriteLibrary, TgamLoader};
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -73,10 +73,18 @@ fn main() -> anyhow::Result<()> {
 fn load_renderer(maps_path: &Path, map_id: i32) -> anyhow::Result<MapRenderer> {
     let map_path = maps_path.join("gfx").join(format!("{}.jar", map_id));
     let lib_path = maps_path.join("data.jar");
+    let light_path = maps_path.join("light").join(format!("{}.jar", map_id));
 
     let map = Map::load(File::open(map_path)?)?;
     let sprites = MapSpriteLibrary::load(File::open(lib_path)?)?;
-    Ok(MapRenderer::new(&map, &sprites))
+
+    let light_map = if light_path.exists() {
+        LightMap::load(File::open(light_path)?)?
+    } else {
+        LightMap::default()
+    };
+
+    Ok(MapRenderer::new(&map, &sprites, &light_map))
 }
 
 fn setup(mut commands: Commands<'_, '_>) {
