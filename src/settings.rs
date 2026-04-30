@@ -2,12 +2,25 @@ use bevy::ecs::resource::Resource;
 use bevy::ecs::system::ResMut;
 use bevy_egui::{EguiContexts, egui};
 
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Resource)]
 pub struct MapViewSettings {
     pub layer_filter_on: bool,
     pub layer: u8,
     pub group_filter_on: bool,
     pub group: i32,
+    pub enable_light: bool,
+}
+
+impl Default for MapViewSettings {
+    fn default() -> Self {
+        Self {
+            layer_filter_on: false,
+            layer: 0,
+            group_filter_on: false,
+            group: 0,
+            enable_light: true,
+        }
+    }
 }
 
 pub fn settings_ui_system(
@@ -31,5 +44,6 @@ pub fn settings_ui_system(
                     egui::Slider::new(&mut settings.group, -1..=1),
                 );
             });
+            ui.checkbox(&mut settings.enable_light, "Enable light");
         });
 }

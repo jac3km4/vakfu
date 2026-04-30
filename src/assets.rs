@@ -1,3 +1,4 @@
+mod light;
 mod map;
 mod sprite;
 mod tgam;
@@ -13,6 +14,7 @@ use bevy::image::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
+pub use light::{LightCell, LightDef, LightMap};
 pub use map::{Map, MapChunk, MapElementDetails, Rgba};
 pub use sprite::{Animation, Frame, Frames, MapSpriteDefinition, MapSpriteLibrary};
 pub use tgam::Tgam;
