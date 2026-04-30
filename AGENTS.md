@@ -41,3 +41,6 @@ Branch naming:
 
 Commit format: [prefix]: [what changed in imperative mood]
   Example: feat: add DWARF v5 support for symbols
+
+PR name format: [prefix]: [what changed in imperative mood]
+  Example: feat: add DWARF v5 support for symbols
