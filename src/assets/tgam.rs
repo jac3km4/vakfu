@@ -4,10 +4,15 @@ use byte::{BytesExt, TryRead};
 /// Represents an image loaded from a TGAM format.
 #[derive(Debug)]
 pub struct Tgam<'a> {
+    /// The physical width of the image.
     width: u16,
+    /// The physical height of the image.
     height: u16,
+    /// The underlying pixel data in RGBA format.
     rgba: &'a [u8],
+    /// The mask data associated with the image.
     mask: &'a [u8],
+    /// A value defining how the mask should be resized or mapped.
     mask_resize: u8,
 }
 
