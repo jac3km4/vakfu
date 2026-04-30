@@ -13,22 +13,38 @@ use super::AssetError;
 /// Defines the properties of a map sprite.
 #[derive(Debug, TryRead)]
 pub struct MapSpriteDefinition {
+    /// The unique identifier for this sprite definition.
     id: i32,
+    /// The X coordinate of the sprite's visual origin relative to the cell center.
     origin_x: i16,
+    /// The Y coordinate of the sprite's visual origin relative to the cell center.
     origin_y: i16,
+    /// The actual width of the image texture.
     texture_width: u16,
+    /// The actual height of the image texture.
     texture_height: u16,
+    /// The width when rendering the sprite.
     render_width: u16,
+    /// The height when rendering the sprite.
     render_height: u16,
+    /// The identifier for the graphics texture to use.
     texture_id: i32,
+    /// Flags conveying various rendering and behavior properties.
     flags: SpriteFlags,
+    /// The perceived visual height used for logic or occlusion.
     visual_height: u8,
+    /// A bitmask controlling the visibility state under specific views.
     visibility_mask: u8,
+    /// A bitmask controlling export rules.
     export_mask: u8,
+    /// The shader ID to apply when drawing the sprite.
     shader: u8,
+    /// The number of animation frames. If 0, the sprite is not animated.
     frame_count: u8,
+    /// The animation data, mapped out depending on `frame_count`.
     #[byte(ctx = (ctx, *frame_count))]
     animation: Animation,
+    /// The identifier for the sound to play when entities interact with this sprite on the ground.
     ground_sound: u8,
 }
 
@@ -92,7 +108,9 @@ impl<C> TryRead<'_, C> for SpriteFlags {
 /// An animation defined for a sprite.
 #[derive(Debug, Clone)]
 pub enum Animation {
+    /// The sprite is static.
     None,
+    /// The sprite uses a series of animated frames.
     Frames(Arc<Frames>),
 }
 
@@ -109,12 +127,19 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Animation {
 /// The frames constituting an animation.
 #[derive(Debug, Default)]
 pub struct Frames {
+    /// The total duration of all frames combined.
     total_time: u32,
+    /// The target width of the frame to render.
     width: u16,
+    /// The target height of the frame to render.
     height: u16,
+    /// The full actual width of the sprite sheet.
     full_width: u16,
+    /// The full actual height of the sprite sheet.
     full_height: u16,
+    /// A list of durations for each sequential frame.
     frame_durations: Vec<u16>,
+    /// A list of coordinates representing the top-left corner of each frame inside the texture sheet.
     frame_coords: Vec<[u16; 2]>,
 }
 
@@ -184,14 +209,18 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {
 /// A single frame of an animation.
 #[derive(Debug)]
 pub struct Frame {
+    /// The localized time at which this frame should start.
     pub time: u16,
+    /// The X coordinate of the frame in the texture.
     pub x: u16,
+    /// The Y coordinate of the frame in the texture.
     pub y: u16,
 }
 
 /// A library of map sprite definitions.
 #[derive(Debug)]
 pub struct MapSpriteLibrary {
+    /// A mapping from a definition ID to the sprite's properties.
     elements: HashMap<i32, MapSpriteDefinition>,
 }
 
