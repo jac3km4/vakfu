@@ -41,9 +41,8 @@ impl MapRenderer {
                 let (texture_width, texture_height) = def.texture_size();
 
                 let light_def = light_map.get_color(elem.cell_x(), elem.cell_y(), elem.group().layer() as i32);
-                let rgba: crate::assets::Rgba = elem.color().into();
-                let [r, g, b, a] = rgba.to_f32_array();
-                let color_tinted = crate::assets::Rgba::new(
+                let [r, g, b, a] = Rgba::from(elem.color()).to_f32_array();
+                let color_tinted = Rgba::new(
                     r * light_def.ambiance_light[0],
                     g * light_def.ambiance_light[1],
                     b * light_def.ambiance_light[2],
