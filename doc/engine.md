@@ -104,8 +104,7 @@ The current Rust implementation provides basic map loading and rendering but lac
 6. **Ground Sound Type**: Extracted in the target engine, missing in Rust.
 7. **Shaders**: The target engine can specify a shader ID per element. The Rust version ignores this flag.
 8. **Visibility Masks**: The target engine supports elements with visibility masks.
-9. **Animated specificities**: The target engine seems to support texture coordinates variations for animations, the Rust one uses standard atlas rendering which works differently.
-10. **Render Tree and Stencils**: The target engine uses a specialized rendering tree structure for rendering ordering, multi-cell elements, and handling mask overlays using Stencil buffers, missing in Rust.
-11. **Camera Masking**: The target engine supports tracking elements and applying camera mask keys and group limits based on the camera view.
-12. **Picking**: The target engine implements picking using hit testing for elements selection which is unimplemented in the Rust version.
-13. **Daylight and Scripted Lighting**: The target engine features managers for day percentage color gradients and scripted modifiers to programmatically mutate scene colors in real-time.
+9. **Render Tree and Stencils**: The target engine uses a specialized rendering tree structure for rendering ordering, multi-cell elements, and handling mask overlays using Stencil buffers, missing in Rust.
+10. **Camera Masking**: The target engine supports tracking elements and applying camera mask keys and group limits based on the camera view.
+11. **Picking**: The target engine implements picking using hit testing for elements selection which is unimplemented in the Rust version.
+12. **Daylight and Scripted Lighting**: The target engine features managers for day percentage color gradients and scripted modifiers to programmatically mutate scene colors in real-time.
