@@ -200,7 +200,39 @@ fn render(
     renderable: &Renderable,
     enable_light: bool,
 ) -> Entity {
-    let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", renderable.texture_id));
+    let mut buf = [0u8; 24];
+    buf[0..10].copy_from_slice(b"gfx://gfx/");
+
+    let mut n = renderable.texture_id.abs();
+    let mut i = 10;
+
+    if renderable.texture_id < 0 {
+        buf[i] = b'-';
+        i += 1;
+    }
+
+    if n == 0 {
+        buf[i] = b'0';
+        i += 1;
+    } else {
+        let mut temp = [0u8; 10];
+        let mut temp_i = 0;
+        while n > 0 {
+            temp[temp_i] = b'0' + (n % 10) as u8;
+            n /= 10;
+            temp_i += 1;
+        }
+        while temp_i > 0 {
+            temp_i -= 1;
+            buf[i] = temp[temp_i];
+            i += 1;
+        }
+    }
+
+    buf[i..i+5].copy_from_slice(b".tgam");
+    let len = i + 5;
+    let path = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+    let img = assets.load::<Image>(path);
 
     let mut layout = TextureAtlasLayout::new_empty(renderable.texture_size);
     match &renderable.animation {
