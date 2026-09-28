@@ -1,16 +1,19 @@
 use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::bail;
-use assets::{JarAssetSource, LightMap, Map, MapSpriteLibrary, TgamLoader};
+use assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContextPass, EguiPlugin};
 use camera::{CameraController, camera_controller_system, camera_system};
 use pico_args::Arguments;
-use render::{MapRenderer, animation_system, rendering_system};
+use render::{
+    ChangeMapEvent, MapCatalog, animation_system, load_map_system, load_renderer, rendering_system,
+};
 use settings::{MapViewSettings, settings_ui_system};
 
 #[allow(unused)]
@@ -26,19 +29,43 @@ fn main() -> anyhow::Result<()> {
     let game_path: PathBuf = pargs.value_from_str("--path")?;
     let maps_path = game_path.join("contents").join("maps");
 
-    let map_id = match pargs.value_from_str::<&str, i32>("--map") {
-        Ok(id) => id,
-        Err(err) => match get_map_list(&maps_path) {
-            Ok(map_ids) => bail!(
-                "no map specified ({err}), you can try one of the following:\n{}",
-                map_ids.join(", ")
-            ),
-            Err(_) => bail!("no map specified ({err}) and could not find anyh"),
-        },
+    let available_maps = match get_map_list(&maps_path) {
+        Ok(ids) if !ids.is_empty() => ids,
+        Ok(_) => bail!("no map files found in {}", maps_path.join("gfx").display()),
+        Err(err) => bail!(
+            "could not read maps directory {}: {err}",
+            maps_path.join("gfx").display()
+        ),
     };
 
+    let map_id = match pargs.opt_value_from_str::<&str, i32>("--map")? {
+        Some(id) => {
+            if !available_maps.contains(&id) {
+                bail!("map {id} not found in {}", maps_path.join("gfx").display());
+            }
+            id
+        }
+        None => available_maps[0],
+    };
+
+    let lib_path = maps_path.join("data.jar");
+    let sprites = Arc::new(MapSpriteLibrary::load(File::open(lib_path)?)?);
     let asset_source = JarAssetSource::new(maps_path.join("gfx.jar"))?;
-    let renderer = load_renderer(&maps_path, map_id)?;
+    let renderer = load_renderer(&maps_path, map_id, &sprites)?;
+
+    let initial_center = renderer.center();
+    let camera_controller = CameraController {
+        target_position: Vec3::new(initial_center.x, initial_center.y, 0.0),
+        current_position: Vec3::new(initial_center.x, initial_center.y, 0.0),
+        ..CameraController::default()
+    };
+
+    let map_catalog = MapCatalog {
+        maps_path,
+        sprites,
+        available_maps,
+        current_map_id: map_id,
+    };
 
     App::new()
         .register_asset_source(
@@ -50,8 +77,10 @@ fn main() -> anyhow::Result<()> {
             enable_multipass_for_primary_context: true,
         })
         .init_asset_loader::<TgamLoader>()
+        .add_event::<ChangeMapEvent>()
+        .insert_resource(map_catalog)
         .insert_resource(renderer)
-        .insert_resource(CameraController::default())
+        .insert_resource(camera_controller)
         .init_resource::<MapViewSettings>()
         .add_systems(Startup, setup)
         .add_systems(
@@ -61,7 +90,13 @@ fn main() -> anyhow::Result<()> {
         .add_systems(
             Update,
             (
-                (camera_controller_system, camera_system, rendering_system).chain(),
+                (
+                    load_map_system,
+                    camera_controller_system,
+                    camera_system,
+                    rendering_system,
+                )
+                    .chain(),
                 animation_system,
             ),
         )
@@ -70,25 +105,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_renderer(maps_path: &Path, map_id: i32) -> anyhow::Result<MapRenderer> {
-    let map_path = maps_path.join("gfx").join(format!("{}.jar", map_id));
-    let lib_path = maps_path.join("data.jar");
-    let light_path = maps_path.join("light").join(format!("{}.jar", map_id));
-
-    let map = Map::load(File::open(map_path)?)?;
-    let sprites = MapSpriteLibrary::load(File::open(lib_path)?)?;
-
-    let light_map = if light_path.exists() {
-        LightMap::load(File::open(light_path)?)?
-    } else {
-        LightMap::default()
-    };
-
-    Ok(MapRenderer::new(&map, &sprites, &light_map))
-}
-
-fn setup(mut commands: Commands<'_, '_>) {
-    commands.spawn(Camera2d);
+fn setup(mut commands: Commands<'_, '_>, camera_controller: Res<'_, CameraController>) {
+    commands.spawn((
+        Camera2d,
+        Transform::from_translation(camera_controller.current_position),
+    ));
 }
 
 fn egui_has_primary_context(
@@ -97,14 +118,15 @@ fn egui_has_primary_context(
     !query.is_empty()
 }
 
-fn get_map_list(maps_path: &Path) -> Result<Vec<String>> {
-    let mut map_ids: Vec<String> = fs::read_dir(maps_path.join("gfx"))?
+fn get_map_list(maps_path: &Path) -> anyhow::Result<Vec<i32>> {
+    let mut map_ids: Vec<i32> = fs::read_dir(maps_path.join("gfx"))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|entry| entry.extension() == Some("jar".as_ref()))
-        .filter_map(|entry| Some(entry.file_stem()?.to_str()?.to_owned()))
+        .filter_map(|entry| entry.file_stem()?.to_str()?.parse::<i32>().ok())
         .collect();
-    map_ids.sort();
+    map_ids.sort_unstable();
+    map_ids.dedup();
 
     Ok(map_ids)
 }
