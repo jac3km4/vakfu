@@ -7,8 +7,7 @@ use anyhow::bail;
 use assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
-use bevy_egui::{EguiContextPass, EguiPlugin};
+use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use camera::{CameraController, camera_controller_system, camera_system};
 use pico_args::Arguments;
 use render::{
@@ -19,6 +18,7 @@ use settings::{MapViewSettings, settings_ui_system};
 #[allow(unused)]
 mod assets;
 mod camera;
+mod premult_alpha;
 mod render;
 mod settings;
 mod util;
@@ -70,21 +70,20 @@ fn main() -> anyhow::Result<()> {
     App::new()
         .register_asset_source(
             "gfx",
-            AssetSourceBuilder::default().with_reader(move || Box::new(asset_source.clone())),
+            AssetSourceBuilder::new(move || Box::new(asset_source.clone())),
         )
         .add_plugins(DefaultPlugins)
-        .add_plugins(EguiPlugin {
-            enable_multipass_for_primary_context: true,
-        })
+        .add_plugins(premult_alpha::PremultAlphaPlugin)
+        .add_plugins(EguiPlugin::default())
         .init_asset_loader::<TgamLoader>()
-        .add_event::<ChangeMapEvent>()
+        .add_message::<ChangeMapEvent>()
         .insert_resource(map_catalog)
         .insert_resource(renderer)
         .insert_resource(camera_controller)
         .init_resource::<MapViewSettings>()
         .add_systems(Startup, setup)
         .add_systems(
-            EguiContextPass,
+            EguiPrimaryContextPass,
             settings_ui_system.run_if(egui_has_primary_context),
         )
         .add_systems(
@@ -108,12 +107,13 @@ fn main() -> anyhow::Result<()> {
 fn setup(mut commands: Commands<'_, '_>, camera_controller: Res<'_, CameraController>) {
     commands.spawn((
         Camera2d,
+        CompositingSpace::Linear,
         Transform::from_translation(camera_controller.current_position),
     ));
 }
 
 fn egui_has_primary_context(
-    query: Query<'_, '_, &bevy_egui::EguiContext, With<PrimaryWindow>>,
+    query: Query<'_, '_, &bevy_egui::EguiContext, With<PrimaryEguiContext>>,
 ) -> bool {
     !query.is_empty()
 }

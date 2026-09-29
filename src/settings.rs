@@ -1,4 +1,4 @@
-use bevy::ecs::event::EventWriter;
+use bevy::ecs::message::MessageWriter;
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Local, Res, ResMut};
 use bevy_egui::{EguiContexts, egui};
@@ -30,12 +30,12 @@ pub fn settings_ui_system(
     mut contexts: EguiContexts<'_, '_>,
     mut settings: ResMut<'_, MapViewSettings>,
     catalog: Res<'_, MapCatalog>,
-    mut change_map: EventWriter<'_, ChangeMapEvent>,
+    mut change_map: MessageWriter<'_, ChangeMapEvent>,
     mut search_filter: Local<'_, String>,
-) {
+) -> bevy::prelude::Result {
     egui::Window::new("Settings")
         .movable(false)
-        .show(contexts.ctx_mut(), |ui| {
+        .show(contexts.ctx_mut()?, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Map:");
 
@@ -105,4 +105,5 @@ pub fn settings_ui_system(
             });
             ui.checkbox(&mut settings.enable_light, "Enable light");
         });
+    Ok(())
 }

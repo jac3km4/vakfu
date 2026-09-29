@@ -15,7 +15,7 @@ use crate::assets::{
 use crate::camera::CameraController;
 use crate::settings::MapViewSettings;
 
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct ChangeMapEvent(pub i32);
 
 #[derive(Resource)]
@@ -177,7 +177,7 @@ pub fn load_renderer(
 
 pub fn load_map_system(
     mut commands: Commands<'_, '_>,
-    mut events: EventReader<'_, '_, ChangeMapEvent>,
+    mut events: MessageReader<'_, '_, ChangeMapEvent>,
     mut catalog: ResMut<'_, MapCatalog>,
     mut render_state: ResMut<'_, MapRenderer>,
     mut camera_controller: ResMut<'_, CameraController>,
@@ -241,7 +241,7 @@ pub fn rendering_system(
         rtree, last_seen, ..
     } = &mut *render_state;
 
-    for elem in rtree.locate_in_envelope_intersecting_mut(&aabb) {
+    for elem in rtree.locate_in_envelope_intersecting_mut(aabb) {
         if settings.layer_filter_on && settings.layer != elem.layer {
             continue;
         }
@@ -349,9 +349,11 @@ fn render(
     sprite.color = Color::linear_rgba(r, g, b, a);
     sprite.flip_x = renderable.flip_x;
     sprite.custom_size = Some(renderable.render_size.as_vec2());
-    sprite.anchor = Anchor::TopLeft;
-
-    let mut entity = commands.spawn((sprite, Transform::from_translation(renderable.position)));
+    let mut entity = commands.spawn((
+        sprite,
+        Anchor::TOP_LEFT,
+        Transform::from_translation(renderable.position),
+    ));
 
     if let Animation::Frames(frames) = &renderable.animation {
         entity.insert(AnimationState {

@@ -38,9 +38,9 @@ impl Default for CameraController {
 }
 
 pub fn camera_controller_system(
-    mut mouse_button_input_events: EventReader<'_, '_, MouseButtonInput>,
-    mut cursor_moved_events: EventReader<'_, '_, CursorMoved>,
-    mut mouse_wheel_events: EventReader<'_, '_, MouseWheel>,
+    mut mouse_button_input_events: MessageReader<'_, '_, MouseButtonInput>,
+    mut cursor_moved_events: MessageReader<'_, '_, CursorMoved>,
+    mut mouse_wheel_events: MessageReader<'_, '_, MouseWheel>,
     mut state: ResMut<'_, CameraController>,
 ) {
     for event in mouse_button_input_events.read() {

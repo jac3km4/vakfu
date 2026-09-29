@@ -5,7 +5,7 @@ Wakfu map renderer
 
 # building
 
-This project requires [cargo](https://crates.io) to build.
+This project requires Rust 1.95 or newer and [cargo](https://crates.io) to build.
 
 Once everything is in place:
 ```bash

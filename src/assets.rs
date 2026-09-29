@@ -20,7 +20,7 @@ pub use sprite::{Animation, Frame, Frames, MapSpriteDefinition, MapSpriteLibrary
 pub use tgam::Tgam;
 use thiserror::Error;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, bevy::reflect::TypePath)]
 pub struct TgamLoader;
 
 impl AssetLoader for TgamLoader {
@@ -99,12 +99,13 @@ impl ErasedAssetReader for JarAssetSource {
 
     fn read_meta<'a>(
         &'a self,
-        _path: &'a std::path::Path,
+        path: &'a std::path::Path,
     ) -> bevy::tasks::BoxedFuture<
         'a,
         Result<Box<dyn bevy::asset::io::Reader + 'a>, bevy::asset::io::AssetReaderError>,
     > {
-        unimplemented!()
+        // Wakfu JARs have no Bevy metadata; NotFound selects default loader settings.
+        Box::pin(async { Err(bevy::asset::io::AssetReaderError::NotFound(path.to_owned())) })
     }
 
     fn read_directory<'a>(
@@ -140,4 +141,40 @@ pub enum AssetError {
     Zip(#[from] zip::result::ZipError),
     #[error("decoding error: {0}")]
     Decoding(#[from] byte::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::asset::io::AssetReaderError;
+
+    use super::*;
+
+    #[test]
+    fn jar_metadata_is_not_found() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let archive_path = std::env::temp_dir().join(format!(
+            "vakfu-metadata-{}-{unique}.jar",
+            std::process::id()
+        ));
+        let file = File::create_new(&archive_path).unwrap();
+        drop(zip::ZipWriter::new(file).finish().unwrap());
+        let source = JarAssetSource::new(&archive_path).unwrap();
+        let path = Path::new("gfx/123.tgam");
+        let metadata_error = bevy::tasks::block_on(source.read_meta(path)).err();
+        let metadata_bytes = bevy::tasks::block_on(source.read_meta_bytes(path));
+        drop(source);
+        std::fs::remove_file(archive_path).unwrap();
+
+        assert_eq!(
+            metadata_error,
+            Some(AssetReaderError::NotFound(path.to_owned()))
+        );
+        assert_eq!(
+            metadata_bytes,
+            Err(AssetReaderError::NotFound(path.to_owned()))
+        );
+    }
 }
