@@ -189,15 +189,6 @@ pub struct Rgba {
 }
 
 impl Rgba {
-    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
-        Self {
-            r: ((r / 2. - 0.5) * 255.) as i8,
-            g: ((g / 2. - 0.5) * 255.) as i8,
-            b: ((b / 2. - 0.5) * 255.) as i8,
-            a: ((a / 2. - 0.5) * 255.) as i8,
-        }
-    }
-
     /// Converts the color to an array of 4 `f32` values.
     pub fn to_f32_array(self) -> [f32; 4] {
         [

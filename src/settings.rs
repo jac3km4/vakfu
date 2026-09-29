@@ -1,3 +1,4 @@
+use bevy::ecs::change_detection::DetectChangesMut;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Local, Res, ResMut};
@@ -5,7 +6,7 @@ use bevy_egui::{EguiContexts, egui};
 
 use crate::render::{ChangeMapEvent, MapCatalog};
 
-#[derive(Debug, Resource)]
+#[derive(Debug, Clone, PartialEq, Resource)]
 pub struct MapViewSettings {
     pub layer_filter_on: bool,
     pub layer: u8,
@@ -33,6 +34,7 @@ pub fn settings_ui_system(
     mut change_map: MessageWriter<'_, ChangeMapEvent>,
     mut search_filter: Local<'_, String>,
 ) -> bevy::prelude::Result {
+    let mut edited_settings = settings.clone();
     egui::Window::new("Settings")
         .movable(false)
         .show(contexts.ctx_mut()?, |ui| {
@@ -90,20 +92,21 @@ pub fn settings_ui_system(
             ui.separator();
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut settings.layer_filter_on, "Layer filter");
+                ui.checkbox(&mut edited_settings.layer_filter_on, "Layer filter");
                 ui.add_enabled(
-                    settings.layer_filter_on,
-                    egui::Slider::new(&mut settings.layer, 0..=127),
+                    edited_settings.layer_filter_on,
+                    egui::Slider::new(&mut edited_settings.layer, 0..=127),
                 );
             });
             ui.horizontal(|ui| {
-                ui.checkbox(&mut settings.group_filter_on, "Group filter");
+                ui.checkbox(&mut edited_settings.group_filter_on, "Group filter");
                 ui.add_enabled(
-                    settings.group_filter_on,
-                    egui::Slider::new(&mut settings.group, -1..=1),
+                    edited_settings.group_filter_on,
+                    egui::Slider::new(&mut edited_settings.group, -1..=1),
                 );
             });
-            ui.checkbox(&mut settings.enable_light, "Enable light");
+            ui.checkbox(&mut edited_settings.enable_light, "Enable light");
         });
+    settings.set_if_neq(edited_settings);
     Ok(())
 }

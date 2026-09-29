@@ -97,23 +97,41 @@ pub fn camera_system(
         controller.target_position = transform.translation;
     }
 
-    controller.current_position = controller
-        .current_position
-        .lerp(controller.target_position, controller.position_smoothness);
+    controller.current_position = smooth_position(
+        controller.current_position,
+        controller.target_position,
+        controller.position_smoothness,
+    );
 
-    controller.current_zoom = lerp(
+    controller.current_zoom = smooth_zoom(
         controller.current_zoom,
         controller.target_zoom,
         controller.zoom_smoothness,
     );
 
-    transform.translation.x = controller.current_position.x;
-    transform.translation.y = controller.current_position.y;
-    transform.scale = Vec3::splat(controller.current_zoom);
+    let mut next_transform = *transform;
+    next_transform.translation.x = controller.current_position.x;
+    next_transform.translation.y = controller.current_position.y;
+    next_transform.scale = Vec3::splat(controller.current_zoom);
+    transform.set_if_neq(next_transform);
 
     Ok(())
 }
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
+fn smooth_position(current: Vec3, target: Vec3, smoothness: f32) -> Vec3 {
+    let next = current.lerp(target, smoothness);
+    if next.distance_squared(target) <= 0.01 * 0.01 {
+        target
+    } else {
+        next
+    }
+}
+
+fn smooth_zoom(current: f32, target: f32, smoothness: f32) -> f32 {
+    let next = current + (target - current) * smoothness;
+    if (next - target).abs() <= 0.0001 {
+        target
+    } else {
+        next
+    }
 }

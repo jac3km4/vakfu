@@ -161,13 +161,13 @@ impl Frames {
 
     /// Returns an iterator over the individual frames.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Frame> {
-        let mut time = 0;
+        let mut time = 0u32;
         self.frame_durations
             .iter()
             .zip(self.frame_coords.iter())
             .map(move |(&duration, &[x, y])| {
                 let frame = Frame { time, x, y };
-                time += duration;
+                time += u32::from(duration);
                 frame
             })
     }
@@ -210,7 +210,7 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {
 #[derive(Debug)]
 pub struct Frame {
     /// The localized time at which this frame should start.
-    pub time: u16,
+    pub time: u32,
     /// The X coordinate of the frame in the texture.
     pub x: u16,
     /// The Y coordinate of the frame in the texture.

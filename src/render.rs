@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::mem;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::window::PrimaryWindow;
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
@@ -30,6 +31,8 @@ pub struct MapCatalog {
 pub struct MapRenderer {
     rtree: RTree<Renderable>,
     last_seen: HashSet<Entity>,
+    spare_seen: HashSet<Entity>,
+    sprite_assets: HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
     center: Vec2,
 }
 
@@ -59,29 +62,31 @@ impl MapRenderer {
                 let y = y + origin_y as f32;
                 let z = z_index as f32 / elements.len() as f32;
 
-                let (width, height) = def.size();
-                let (texture_width, texture_height) = def.texture_size();
+                // Preserve the asset format's established mapping: size() is
+                // the sampled rectangle, texture_size() is the world-space size.
+                let (sample_width, sample_height) = def.size();
+                let (display_width, display_height) = def.texture_size();
 
                 min_x = min_x.min(x);
-                max_x = max_x.max(x + texture_width as f32);
-                min_y = min_y.min(y - texture_height as f32);
+                max_x = max_x.max(x + display_width as f32);
+                min_y = min_y.min(y - display_height as f32);
                 max_y = max_y.max(y);
 
                 let light_def =
                     light_map.get_color(elem.cell_x(), elem.cell_y(), elem.group().layer() as i32);
                 let [r, g, b, a] = Rgba::from(elem.color()).to_f32_array();
-                let color_tinted = Rgba::new(
-                    r * light_def.ambiance_light[0],
-                    g * light_def.ambiance_light[1],
-                    b * light_def.ambiance_light[2],
-                    a,
-                );
+                let color = LinearRgba::new(r, g, b, a);
+                let color_tinted = {
+                    let [r, g, b] = light_def.ambiance_light;
+                    LinearRgba::new(color.red * r, color.green * g, color.blue * b, color.alpha)
+                };
 
                 Renderable {
                     position: Vec3::new(x, y, z),
-                    texture_size: UVec2::new(width.into(), height.into()),
-                    render_size: UVec2::new(texture_width.into(), texture_height.into()),
-                    color: elem.color().into(),
+                    definition_id: elem.definition_id(),
+                    texture_size: UVec2::new(sample_width.into(), sample_height.into()),
+                    render_size: UVec2::new(display_width.into(), display_height.into()),
+                    color,
                     color_tinted,
                     texture_id: def.texture_id(),
                     flip_x: def.flags().is_flip(),
@@ -103,6 +108,8 @@ impl MapRenderer {
         Self {
             rtree: RTree::bulk_load(sprites),
             last_seen: HashSet::new(),
+            spare_seen: HashSet::new(),
+            sprite_assets: HashMap::new(),
             center,
         }
     }
@@ -122,11 +129,12 @@ impl MapRenderer {
 
 #[derive(Debug)]
 struct Renderable {
+    definition_id: i32,
     position: Vec3,
     texture_size: UVec2,
     render_size: UVec2,
-    color: Rgba,
-    color_tinted: Rgba,
+    color: LinearRgba,
+    color_tinted: LinearRgba,
     texture_id: i32,
     flip_x: bool,
     animation: Animation,
@@ -213,7 +221,7 @@ pub fn load_map_system(
 pub fn rendering_system(
     mut commands: Commands<'_, '_>,
     assets: Res<'_, AssetServer>,
-    window: Query<'_, '_, &Window, With<PrimaryWindow>>,
+    window: Query<'_, '_, Ref<'_, Window>, With<PrimaryWindow>>,
     cameras: Query<'_, '_, Ref<'_, Transform>, With<Camera>>,
     mut atlas_layouts: ResMut<'_, Assets<TextureAtlasLayout>>,
     mut render_state: ResMut<'_, MapRenderer>,
@@ -224,11 +232,14 @@ pub fn rendering_system(
         return Ok(());
     };
 
-    if !camera.is_changed() && !render_state.is_changed() && !settings.is_changed() {
+    let window = window.single()?;
+    if !camera.is_changed()
+        && !window.is_changed()
+        && !render_state.is_changed()
+        && !settings.is_changed()
+    {
         return Ok(());
     }
-
-    let window = window.single()?;
     let view_size = window.size() * camera.scale.truncate();
     let view_pos = camera.translation.truncate() - view_size / 2.;
     let aabb = AABB::from_corners(
@@ -236,10 +247,15 @@ pub fn rendering_system(
         (view_pos.x + view_size.x, view_pos.y + view_size.y),
     );
 
-    let mut seen = HashSet::new();
+    let update_color = settings.is_changed();
     let MapRenderer {
-        rtree, last_seen, ..
+        rtree,
+        last_seen,
+        spare_seen: seen,
+        sprite_assets,
+        ..
     } = &mut *render_state;
+    seen.clear();
 
     for elem in rtree.locate_in_envelope_intersecting_mut(aabb) {
         if settings.layer_filter_on && settings.layer != elem.layer {
@@ -251,14 +267,16 @@ pub fn rendering_system(
 
         let entity = match elem.id {
             Some(id) if commands.get_entity(id).is_ok() => {
-                if let Ok(mut sprite) = sprites.get_mut(id) {
+                if update_color && let Ok(mut sprite) = sprites.get_mut(id) {
                     let active_color = if settings.enable_light {
                         elem.color_tinted
                     } else {
                         elem.color
                     };
-                    let [r, g, b, a] = active_color.to_f32_array();
-                    sprite.color = Color::linear_rgba(r, g, b, a);
+                    let color = premultiplied_tint(active_color);
+                    if sprite.color != color {
+                        sprite.color = color;
+                    }
                 }
                 id
             }
@@ -267,6 +285,7 @@ pub fn rendering_system(
                     &mut commands,
                     &assets,
                     &mut atlas_layouts,
+                    sprite_assets,
                     elem,
                     settings.enable_light,
                 );
@@ -277,11 +296,11 @@ pub fn rendering_system(
         seen.insert(entity);
     }
 
-    for elem in last_seen.difference(&seen) {
+    for elem in last_seen.difference(seen) {
         commands.entity(*elem).despawn();
     }
 
-    *last_seen = seen;
+    mem::swap(last_seen, seen);
 
     Ok(())
 }
@@ -291,20 +310,14 @@ pub fn animation_system(
     mut query: Query<'_, '_, (&mut AnimationState, &mut Sprite)>,
 ) {
     for (mut state, mut sprite) in &mut query {
-        let Some(atlas) = &mut sprite.texture_atlas else {
-            continue;
-        };
-
         state.timer.tick(time.delta());
-
-        if let Some((i, _)) = state
-            .frames
-            .iter()
-            .enumerate()
-            .take_while(|(_, f)| u128::from(f.time) < state.timer.elapsed().as_millis())
-            .last()
+        let index = frame_index(&state.frames, state.timer.elapsed());
+        if sprite
+            .texture_atlas
+            .as_ref()
+            .is_some_and(|atlas| atlas.index != index)
         {
-            atlas.index = i;
+            sprite.texture_atlas.as_mut().unwrap().index = index;
         }
     }
 }
@@ -313,40 +326,24 @@ fn render(
     commands: &mut Commands<'_, '_>,
     assets: &Res<'_, AssetServer>,
     atlas_layouts: &mut ResMut<'_, Assets<TextureAtlasLayout>>,
+    sprite_assets: &mut HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
     renderable: &Renderable,
     enable_light: bool,
 ) -> Entity {
-    let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", renderable.texture_id));
+    let (img, layout) = sprite_assets
+        .entry(renderable.definition_id)
+        .or_insert_with(|| {
+            let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", renderable.texture_id));
+            (img, atlas_layouts.add(atlas_layout(renderable)))
+        });
 
-    let mut layout = TextureAtlasLayout::new_empty(renderable.texture_size);
-    match &renderable.animation {
-        Animation::None => {
-            layout.add_texture(URect {
-                min: UVec2::ZERO,
-                max: renderable.texture_size,
-            });
-        }
-        Animation::Frames(frames) => {
-            for frame in frames.iter() {
-                let min = UVec2::new(frame.x.into(), frame.y.into());
-                let max = UVec2::new(
-                    (frame.x + frames.width()).into(),
-                    (frame.y + frames.height()).into(),
-                );
-                layout.add_texture(URect { min, max });
-            }
-        }
-    };
-    let layout = atlas_layouts.add(layout);
-
-    let mut sprite = Sprite::from_atlas_image(img, layout.into());
+    let mut sprite = Sprite::from_atlas_image(img.clone(), layout.clone().into());
     let active_color = if enable_light {
         renderable.color_tinted
     } else {
         renderable.color
     };
-    let [r, g, b, a] = active_color.to_f32_array();
-    sprite.color = Color::linear_rgba(r, g, b, a);
+    sprite.color = premultiplied_tint(active_color);
     sprite.flip_x = renderable.flip_x;
     sprite.custom_size = Some(renderable.render_size.as_vec2());
     let mut entity = commands.spawn((
@@ -366,4 +363,46 @@ fn render(
     }
 
     entity.id()
+}
+
+fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
+    frames
+        .iter()
+        .take_while(|frame| u128::from(frame.time) <= elapsed.as_millis())
+        .count()
+        .saturating_sub(1)
+}
+
+fn premultiplied_tint(color: LinearRgba) -> Color {
+    // The texture is already premultiplied, but Bevy's sprite shader also
+    // multiplies it by this tint. Tint opacity must attenuate RGB as well.
+    Color::linear_rgba(
+        color.red * color.alpha,
+        color.green * color.alpha,
+        color.blue * color.alpha,
+        color.alpha,
+    )
+}
+
+fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
+    let mut layout = TextureAtlasLayout::new_empty(renderable.texture_size);
+    match &renderable.animation {
+        Animation::None => {
+            layout.add_texture(URect {
+                min: UVec2::ZERO,
+                max: renderable.texture_size,
+            });
+        }
+        Animation::Frames(frames) => {
+            for frame in frames.iter() {
+                let min = UVec2::new(frame.x.into(), frame.y.into());
+                let max = UVec2::new(
+                    u32::from(frame.x) + u32::from(frames.width()),
+                    u32::from(frame.y) + u32::from(frames.height()),
+                );
+                layout.add_texture(URect { min, max });
+            }
+        }
+    };
+    layout
 }

@@ -121,29 +121,32 @@ impl LightMap {
                 entry.read_to_end(&mut buffer)?;
 
                 let (cell, _) = LightCell::try_read(&buffer, LittleEndian)?;
-                let mapx = cell.cell_x / 18;
-                let mapy = cell.cell_y / 18;
-                let hash = mapx << 16 | (mapy & 0xFFFF);
+                let mapx = cell.cell_x.div_euclid(18);
+                let mapy = cell.cell_y.div_euclid(18);
+                let hash = chunk_key(mapx, mapy);
                 light_maps.insert(hash, cell);
             }
         }
         Ok(LightMap { light_maps })
     }
 
-    pub fn get_color(&self, cell_x: i32, cell_y: i32, layer_idx: i32) -> Arc<LightDef> {
-        let map_x = (cell_x as f32 / 18f32).floor() as i32;
-        let map_y = (cell_y as f32 / 18f32).floor() as i32;
-        let key = map_x << 16 | map_y;
+    pub fn get_color(&self, cell_x: i32, cell_y: i32, layer_idx: i32) -> &LightDef {
+        let map_x = cell_x.div_euclid(18);
+        let map_y = cell_y.div_euclid(18);
+        let key = chunk_key(map_x, map_y);
 
-        if let Some(cell) = self.light_maps.get(&key) {
-            let hash = (cell_x - cell.cell_x) + ((cell_y - cell.cell_y) + (layer_idx * 18)) * 18;
-            if let Some(color) = cell.layer_colors.get(&hash) {
-                color.clone()
-            } else {
-                Arc::new(LightDef::DEFAULT)
-            }
-        } else {
-            Arc::new(LightDef::DEFAULT)
-        }
+        self.light_maps
+            .get(&key)
+            .and_then(|cell| {
+                let hash =
+                    (cell_x - cell.cell_x) + ((cell_y - cell.cell_y) + (layer_idx * 18)) * 18;
+                cell.layer_colors.get(&hash)
+            })
+            .map(Arc::as_ref)
+            .unwrap_or(&LightDef::DEFAULT)
     }
+}
+
+fn chunk_key(x: i32, y: i32) -> i32 {
+    x << 16 | (y & 0xFFFF)
 }
