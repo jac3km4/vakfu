@@ -18,16 +18,13 @@ features = [
     "async_executor",
     "bevy_log",
     "bevy_winit",
-    "bevy_image",
     "bevy_sprite_render",
     "mouse",
     "keyboard",
     "multi_threaded",
-    "std",
     "wayland",
     "webgl2",
     "x11",
-    "zstd_rust",
 ]
 
 [dependencies.bevy_egui]
@@ -38,7 +35,7 @@ features = ["default_fonts", "render"]
 [dependencies.zip]
 version = "8"
 default-features = false
-features = ["deflate"]
+features = ["deflate-flate2-zlib-rs"]
 
 [dependencies.byte]
 git = "https://github.com/jac3km4/byte"
@@ -46,16 +43,13 @@ rev = "da71833"
 features = ["alloc", "derive"]
 
 [lints.rust]
-warnings = "warn"
 future-incompatible = "warn"
 let-underscore = "warn"
-nonstandard-style = "warn"
 rust-2018-compatibility = "warn"
 rust-2018-idioms = "warn"
 rust-2021-compatibility = "warn"
 
 [lints.clippy]
-all = "warn"
 match_same_arms = "warn"
 semicolon_if_nothing_returned = "warn"
 single_match_else = "warn"
