@@ -6,7 +6,9 @@ use std::sync::Arc;
 use anyhow::bail;
 use assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
 use bevy::asset::io::AssetSourceBuilder;
+use bevy::camera::CameraUpdateSystems;
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use camera::{CameraController, camera_controller_system, camera_system};
 use pico_args::Arguments;
@@ -88,16 +90,14 @@ fn main() -> anyhow::Result<()> {
         )
         .add_systems(
             Update,
-            (
-                (
-                    load_map_system,
-                    camera_controller_system,
-                    camera_system,
-                    rendering_system,
-                )
-                    .chain(),
-                animation_system,
-            ),
+            (load_map_system, camera_controller_system, camera_system).chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            (rendering_system, animation_system)
+                .chain()
+                .after(CameraUpdateSystems)
+                .before(TransformSystems::Propagate),
         )
         .run();
 

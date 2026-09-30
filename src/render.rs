@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use bevy::window::PrimaryWindow;
 use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
@@ -160,7 +159,6 @@ impl RTreeObject for Renderable {
 
 #[derive(Component)]
 pub struct AnimationState {
-    timer: Timer,
     frames: Arc<Frames>,
 }
 
@@ -221,31 +219,26 @@ pub fn load_map_system(
 pub fn rendering_system(
     mut commands: Commands<'_, '_>,
     assets: Res<'_, AssetServer>,
-    window: Query<'_, '_, Ref<'_, Window>, With<PrimaryWindow>>,
-    cameras: Query<'_, '_, Ref<'_, Transform>, With<Camera>>,
+    cameras: Query<'_, '_, (Ref<'_, Camera>, Ref<'_, Transform>)>,
     mut atlas_layouts: ResMut<'_, Assets<TextureAtlasLayout>>,
     mut render_state: ResMut<'_, MapRenderer>,
     settings: Res<'_, MapViewSettings>,
     mut sprites: Query<'_, '_, &mut Sprite>,
 ) -> Result {
-    let Ok(camera) = cameras.single() else {
+    let Ok((camera, transform)) = cameras.single() else {
         return Ok(());
     };
 
-    let window = window.single()?;
     if !camera.is_changed()
-        && !window.is_changed()
+        && !transform.is_changed()
         && !render_state.is_changed()
         && !settings.is_changed()
     {
         return Ok(());
     }
-    let view_size = window.size() * camera.scale.truncate();
-    let view_pos = camera.translation.truncate() - view_size / 2.;
-    let aabb = AABB::from_corners(
-        (view_pos.x, view_pos.y),
-        (view_pos.x + view_size.x, view_pos.y + view_size.y),
-    );
+    let Some(aabb) = camera_bounds(&camera, &GlobalTransform::from(*transform)) else {
+        return Ok(());
+    };
 
     let update_color = settings.is_changed();
     let MapRenderer {
@@ -307,11 +300,10 @@ pub fn rendering_system(
 
 pub fn animation_system(
     time: Res<'_, Time>,
-    mut query: Query<'_, '_, (&mut AnimationState, &mut Sprite)>,
+    mut query: Query<'_, '_, (&AnimationState, &mut Sprite)>,
 ) {
-    for (mut state, mut sprite) in &mut query {
-        state.timer.tick(time.delta());
-        let index = frame_index(&state.frames, state.timer.elapsed());
+    for (state, mut sprite) in &mut query {
+        let index = frame_index(&state.frames, time.elapsed());
         if sprite
             .texture_atlas
             .as_ref()
@@ -354,10 +346,6 @@ fn render(
 
     if let Animation::Frames(frames) = &renderable.animation {
         entity.insert(AnimationState {
-            timer: Timer::new(
-                Duration::from_millis(frames.total_time().into()),
-                TimerMode::Repeating,
-            ),
             frames: frames.clone(),
         });
     }
@@ -365,10 +353,37 @@ fn render(
     entity.id()
 }
 
+fn camera_bounds(camera: &Camera, transform: &GlobalTransform) -> Option<AABB<(f32, f32)>> {
+    // Use all four corners: two diagonal corners do not bound a rotated view.
+    let mut min = Vec2::splat(f32::INFINITY);
+    let mut max = Vec2::splat(f32::NEG_INFINITY);
+    for corner in [
+        Vec2::NEG_ONE,
+        Vec2::new(-1.0, 1.0),
+        Vec2::ONE,
+        Vec2::new(1.0, -1.0),
+    ] {
+        let point = camera
+            .ndc_to_world(transform, corner.extend(1.0))?
+            .truncate();
+        if !point.is_finite() {
+            return None;
+        }
+        min = min.min(point);
+        max = max.max(point);
+    }
+    Some(AABB::from_corners((min.x, min.y), (max.x, max.y)))
+}
+
 fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
+    // A shared clock keeps instances synchronized, including after culling.
+    if frames.total_time() == 0 {
+        return 0;
+    }
+    let elapsed = elapsed.as_millis() % u128::from(frames.total_time());
     frames
         .iter()
-        .take_while(|frame| u128::from(frame.time) <= elapsed.as_millis())
+        .take_while(|frame| u128::from(frame.time) <= elapsed)
         .count()
         .saturating_sub(1)
 }
