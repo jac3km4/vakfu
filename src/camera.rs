@@ -1,6 +1,7 @@
 use bevy::input::ButtonState;
 use bevy::input::mouse::{MouseButtonInput, MouseWheel};
 use bevy::prelude::*;
+use bevy_egui::{EguiContext, PrimaryEguiContext};
 
 #[derive(Resource)]
 pub struct CameraController {
@@ -42,7 +43,15 @@ pub fn camera_controller_system(
     mut cursor_moved_events: MessageReader<'_, '_, CursorMoved>,
     mut mouse_wheel_events: MessageReader<'_, '_, MouseWheel>,
     mut state: ResMut<'_, CameraController>,
+    mut egui_contexts: Query<'_, '_, &mut EguiContext, With<PrimaryEguiContext>>,
 ) {
+    if egui_contexts
+        .iter_mut()
+        .any(|mut context| context.get_mut().is_pointer_over_egui())
+    {
+        return;
+    }
+
     for event in mouse_button_input_events.read() {
         if event.button == MouseButton::Left {
             state.dragging = event.state == ButtonState::Pressed;
