@@ -113,7 +113,7 @@ impl LightMap {
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i)?;
             if entry
-                .name()
+                .name()?
                 .trim_matches(|c| char::is_numeric(c) || c == '-')
                 == "_"
             {

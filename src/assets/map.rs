@@ -26,7 +26,7 @@ impl Map {
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
             if file
-                .name()
+                .name()?
                 .trim_matches(|c| char::is_numeric(c) || c == '-')
                 == "_"
             {
