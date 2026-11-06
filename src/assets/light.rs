@@ -155,3 +155,22 @@ impl LightMap {
 pub fn chunk_key(x: i32, y: i32) -> i32 {
     x << 16 | (y & 0xFFFF)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chunk_key_and_coordinates() {
+        assert_eq!(chunk_key(0, 0), 0);
+        assert_eq!(chunk_key(1, 2), (1 << 16) | 2);
+        assert_eq!(chunk_key(-1, -1), (-1i32 << 16) | 0xFFFF);
+
+        let map = LightMap::default();
+        let default_color = map.get_color(10, 20, 0);
+        assert_eq!(
+            default_color.ambiance_light,
+            LightDef::DEFAULT.ambiance_light
+        );
+    }
+}

@@ -100,3 +100,60 @@ pub fn round_up_to_power_of_two(value: u32) -> u32 {
         value.next_power_of_two()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use byte::ctx::LittleEndian;
+
+    use super::*;
+
+    #[test]
+    fn power_of_two_rounding() {
+        assert_eq!(round_up_to_power_of_two(0), 0);
+        assert_eq!(round_up_to_power_of_two(1), 1);
+        assert_eq!(round_up_to_power_of_two(2), 2);
+        assert_eq!(round_up_to_power_of_two(3), 4);
+        assert_eq!(round_up_to_power_of_two(4), 4);
+        assert_eq!(round_up_to_power_of_two(15), 16);
+        assert_eq!(round_up_to_power_of_two(16), 16);
+        assert_eq!(round_up_to_power_of_two(17), 32);
+    }
+
+    #[test]
+    fn try_read_valid_tgam() {
+        let mut bytes = Vec::new();
+        bytes.push(0); // resize_mask
+        bytes.extend_from_slice(b"AGT"); // header
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // width
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // height
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // rgba_size (2x2x4 = 16)
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // mask_size
+        bytes.extend_from_slice(&[255u8; 16]); // rgba pixel payload
+
+        let (tgam, read_len) = Tgam::try_read(&bytes, LittleEndian).unwrap();
+        assert_eq!(read_len, bytes.len());
+        assert_eq!(tgam.width, 2);
+        assert_eq!(tgam.height, 2);
+        assert_eq!(tgam.rgba.len(), 16);
+    }
+
+    #[test]
+    fn try_read_invalid_magic() {
+        let bytes = b"INVALID_HEADER_DATA";
+        assert!(Tgam::try_read(bytes, LittleEndian).is_err());
+    }
+
+    #[test]
+    fn try_read_mismatched_rgba_size() {
+        let mut bytes = Vec::new();
+        bytes.push(0);
+        bytes.extend_from_slice(b"AGT");
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&12u32.to_le_bytes()); // expected 16, got 12
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&[255u8; 12]);
+
+        assert!(Tgam::try_read(&bytes, LittleEndian).is_err());
+    }
+}

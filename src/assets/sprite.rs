@@ -178,6 +178,20 @@ impl Frames {
                 frame
             })
     }
+
+    #[cfg(test)]
+    pub fn new_for_test(total_time: u32, frame_durations: Vec<u16>) -> Self {
+        let frame_coords = vec![[0, 0]; frame_durations.len()];
+        Self {
+            total_time,
+            width: 16,
+            height: 16,
+            full_width: 16,
+            full_height: 16,
+            frame_durations,
+            frame_coords,
+        }
+    }
 }
 
 impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {

@@ -363,3 +363,53 @@ pub fn iso_to_screen(x: i32, y: i32, height: i32) -> (f32, f32) {
     let fy = ((-(x + y) * CELL_HEIGHT) as f32 / 2.) + (height * ELEVATION_UNIT) as f32;
     (fx, fy)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_iso_to_screen_origin() {
+        let (x, y) = iso_to_screen(0, 0, 0);
+        assert_eq!(x, 0.0);
+        assert_eq!(y, 0.0);
+    }
+
+    #[test]
+    fn test_iso_to_screen_transformation() {
+        let (x, y) = iso_to_screen(1, 1, 2);
+        assert_eq!(x, 0.0);
+        assert_eq!(y, -23.0);
+
+        let (x2, y2) = iso_to_screen(2, 0, 0);
+        assert_eq!(x2, 86.0);
+        assert_eq!(y2, -43.0);
+    }
+
+    #[test]
+    fn test_rgba_to_f32_array_clamping() {
+        let rgba = Rgba {
+            r: 127,
+            g: -128,
+            b: 0,
+            a: 127,
+        };
+        let arr = rgba.to_f32_array();
+        assert!(arr[0] >= 0.0);
+        assert!(arr[1] >= 0.0);
+        assert!(arr[2] >= 0.0);
+        assert!((0.0..=1.0).contains(&arr[3]));
+
+        let clamped = Rgba {
+            r: -128,
+            g: -128,
+            b: -128,
+            a: -128,
+        }
+        .to_f32_array();
+        assert_eq!(clamped[0], 0.0);
+        assert_eq!(clamped[1], 0.0);
+        assert_eq!(clamped[2], 0.0);
+        assert_eq!(clamped[3], 0.0);
+    }
+}

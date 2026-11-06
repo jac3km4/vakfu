@@ -467,3 +467,43 @@ fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
     };
     layout
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn test_frame_index_calculations() {
+        let frames = Frames::new_for_test(300, vec![100, 100, 100]);
+        assert_eq!(frame_index(&frames, Duration::from_millis(0)), 0);
+        assert_eq!(frame_index(&frames, Duration::from_millis(50)), 0);
+        assert_eq!(frame_index(&frames, Duration::from_millis(100)), 1);
+        assert_eq!(frame_index(&frames, Duration::from_millis(150)), 1);
+        assert_eq!(frame_index(&frames, Duration::from_millis(200)), 2);
+        assert_eq!(frame_index(&frames, Duration::from_millis(299)), 2);
+        // Loops around at 300ms
+        assert_eq!(frame_index(&frames, Duration::from_millis(300)), 0);
+        assert_eq!(frame_index(&frames, Duration::from_millis(450)), 1);
+    }
+
+    #[test]
+    fn test_frame_index_zero_total_time() {
+        let frames = Frames::new_for_test(0, vec![]);
+        assert_eq!(frame_index(&frames, Duration::from_millis(100)), 0);
+    }
+
+    #[test]
+    fn test_premultiplied_tint() {
+        let tint = premultiplied_tint(LinearRgba::new(1.0, 0.5, 0.25, 0.5));
+        assert_eq!(tint, Color::linear_rgba(0.5, 0.25, 0.125, 0.5));
+
+        // Test clamping of alpha > 1.0 or < 0.0
+        let clamped_high = premultiplied_tint(LinearRgba::new(1.0, 1.0, 1.0, 2.0));
+        assert_eq!(clamped_high, Color::linear_rgba(1.0, 1.0, 1.0, 1.0));
+
+        let clamped_low = premultiplied_tint(LinearRgba::new(1.0, 1.0, 1.0, -0.5));
+        assert_eq!(clamped_low, Color::linear_rgba(0.0, 0.0, 0.0, 0.0));
+    }
+}
