@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+use bevy::tasks::{AsyncComputeTaskPool, Task, futures_lite::future};
 use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
@@ -25,6 +26,9 @@ pub struct MapCatalog {
     pub available_maps: Vec<i32>,
     pub current_map_id: i32,
 }
+
+#[derive(Resource, Default)]
+pub struct PendingMapLoad(pub Option<Task<anyhow::Result<(i32, MapRenderer)>>>);
 
 #[derive(Debug, Resource)]
 pub struct MapRenderer {
@@ -211,14 +215,32 @@ pub fn load_map_system(
     mut render_state: ResMut<'_, MapRenderer>,
     mut camera_controller: ResMut<'_, CameraController>,
     mut cameras: Query<'_, '_, &mut Transform, With<Camera>>,
+    mut pending_load: ResMut<'_, PendingMapLoad>,
 ) {
+    let mut latest_map_id = None;
     for &ChangeMapEvent(map_id) in events.read() {
-        if map_id == catalog.current_map_id {
-            continue;
+        if map_id != catalog.current_map_id {
+            latest_map_id = Some(map_id);
         }
+    }
 
-        match load_renderer(&catalog.maps_path, map_id, &catalog.sprites) {
-            Ok(new_renderer) => {
+    if let Some(target_map_id) = latest_map_id {
+        let pool = AsyncComputeTaskPool::get();
+        let maps_path = catalog.maps_path.clone();
+        let sprites = catalog.sprites.clone();
+        let task = pool.spawn(async move {
+            let renderer = load_renderer(&maps_path, target_map_id, &sprites)?;
+            Ok((target_map_id, renderer))
+        });
+        pending_load.0 = Some(task);
+    }
+
+    if let Some(ref mut task) = pending_load.0
+        && let Some(result) = future::block_on(future::poll_once(task))
+    {
+        pending_load.0 = None;
+        match result {
+            Ok((map_id, new_renderer)) => {
                 render_state.despawn_visible(&mut commands);
                 let center = new_renderer.center();
                 camera_controller.current_position = Vec3::new(center.x, center.y, 0.0);
@@ -232,7 +254,7 @@ pub fn load_map_system(
                 info!("Switched to map {map_id}");
             }
             Err(err) => {
-                error!("Failed to load map {map_id}: {err}");
+                error!("Failed to load map: {err}");
             }
         }
     }

@@ -13,7 +13,8 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use camera::{CameraController, camera_controller_system, camera_system};
 use pico_args::Arguments;
 use render::{
-    ChangeMapEvent, MapCatalog, animation_system, load_map_system, load_renderer, rendering_system,
+    ChangeMapEvent, MapCatalog, PendingMapLoad, animation_system, load_map_system, load_renderer,
+    rendering_system,
 };
 use settings::{MapViewSettings, settings_ui_system};
 
@@ -126,6 +127,7 @@ fn main() -> anyhow::Result<()> {
         .insert_resource(map_catalog)
         .insert_resource(renderer)
         .insert_resource(camera_controller)
+        .init_resource::<PendingMapLoad>()
         .init_resource::<MapViewSettings>()
         .add_systems(Startup, setup)
         .add_systems(
