@@ -1,7 +1,7 @@
 use std::io::{Read, Seek};
 
-use byte::TryRead;
-use byte::ctx::LittleEndian;
+use byte::ctx::{Endianess, LittleEndian};
+use byte::{BytesExt, TryRead};
 
 use super::AssetError;
 use crate::util::{WithSize, WithSizePrefix};
@@ -82,8 +82,9 @@ impl MapChunk {
     /// Returns an iterator over the elements in the chunk.
     pub fn elements(&self) -> impl Iterator<Item = MapElementDetails<'_>> {
         self.sub_chunks.iter().flat_map(move |sub| {
-            let row_size = i32::from(sub.max_y - sub.min_y);
-            sub.cells.iter().zip(0i32..).flat_map(move |(cell, i)| {
+            let row_size = i32::from(sub.max_y) - i32::from(sub.min_y);
+            let cells = if row_size > 0 { &sub.cells[..] } else { &[] };
+            cells.iter().zip(0i32..).flat_map(move |(cell, i)| {
                 let cell_x = self.map_x + i32::from(sub.min_x) + i / row_size;
                 let cell_y = self.map_y + i32::from(sub.min_y) + i % row_size;
                 cell.elements.iter().map(move |element| MapElementDetails {
@@ -98,7 +99,7 @@ impl MapChunk {
 }
 
 /// Represents a sub-section of a chunk, defining a rectangular area of cells.
-#[derive(Debug, TryRead)]
+#[derive(Debug)]
 struct MapSubChunk {
     /// The minimum relative X coordinate of the sub-chunk area.
     min_x: i8,
@@ -110,8 +111,38 @@ struct MapSubChunk {
     max_y: i8,
 
     /// The cells contained within this sub-chunk area.
-    #[byte(ctx = WithSize::new(ctx, (max_x - min_x) as usize * (max_y - min_y) as usize))]
     cells: Vec<MapCell>,
+}
+
+impl<'a, C: Endianess> TryRead<'a, C> for MapSubChunk {
+    fn try_read(bytes: &'a [u8], ctx: C) -> byte::Result<(Self, usize)> {
+        let offset = &mut 0;
+        let min_x: i8 = bytes.read(offset, ctx)?;
+        let max_x: i8 = bytes.read(offset, ctx)?;
+        let min_y: i8 = bytes.read(offset, ctx)?;
+        let max_y: i8 = bytes.read(offset, ctx)?;
+
+        let width = i32::from(max_x) - i32::from(min_x);
+        let height = i32::from(max_y) - i32::from(min_y);
+        if width < 0 || height < 0 {
+            return Err(byte::Error::BadInput {
+                err: "invalid subchunk bounds",
+            });
+        }
+        let count = (width as usize) * (height as usize);
+        let cells: Vec<MapCell> = bytes.read(offset, WithSize::new(ctx, count))?;
+
+        Ok((
+            Self {
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                cells,
+            },
+            *offset,
+        ))
+    }
 }
 
 /// A single cell within a map sub-chunk, containing rendering elements.
