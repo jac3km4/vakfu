@@ -45,26 +45,29 @@ pub fn camera_controller_system(
     mut state: ResMut<'_, CameraController>,
     mut egui_contexts: Query<'_, '_, &mut EguiContext, With<PrimaryEguiContext>>,
 ) {
-    if egui_contexts
+    let is_over_egui = egui_contexts
         .iter_mut()
-        .any(|mut context| context.get_mut().is_pointer_over_egui())
-    {
-        return;
-    }
+        .any(|mut context| context.get_mut().is_pointer_over_egui());
 
     for event in mouse_button_input_events.read() {
         if event.button == MouseButton::Left {
-            state.dragging = event.state == ButtonState::Pressed;
-            if !state.dragging {
-                state.last_cursor_position = None;
+            match event.state {
+                ButtonState::Pressed => {
+                    if !is_over_egui {
+                        state.dragging = true;
+                    }
+                }
+                ButtonState::Released => {
+                    state.dragging = false;
+                    state.last_cursor_position = None;
+                }
             }
         }
     }
 
-    if state.dragging {
-        for event in cursor_moved_events.read() {
-            let current_position = event.position;
-
+    for event in cursor_moved_events.read() {
+        let current_position = event.position;
+        if state.dragging {
             if let Some(last_position) = state.last_cursor_position {
                 let delta = current_position - last_position;
                 // invert x for natural movement direction
@@ -75,15 +78,18 @@ pub fn camera_controller_system(
                 );
                 state.target_position += world_delta;
             }
-
             state.last_cursor_position = Some(current_position);
+        } else {
+            state.last_cursor_position = None;
         }
     }
 
     for event in mouse_wheel_events.read() {
-        let zoom_delta = event.y * state.zoom_sensitivity;
-        state.target_zoom -= zoom_delta;
-        state.target_zoom = state.target_zoom.clamp(1.0, 20.0);
+        if !is_over_egui {
+            let zoom_delta = event.y * state.zoom_sensitivity;
+            state.target_zoom -= zoom_delta;
+            state.target_zoom = state.target_zoom.clamp(1.0, 20.0);
+        }
     }
 }
 
