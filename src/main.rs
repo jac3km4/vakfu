@@ -51,8 +51,18 @@ fn main() -> anyhow::Result<()> {
     };
 
     let lib_path = maps_path.join("data.jar");
-    let sprites = Arc::new(MapSpriteLibrary::load(File::open(lib_path)?)?);
-    let asset_source = JarAssetSource::new(maps_path.join("gfx.jar"))?;
+    let sprites = Arc::new(MapSpriteLibrary::load(File::open(&lib_path).map_err(
+        |err| {
+            anyhow::anyhow!(
+                "failed to open sprite library {}: {err}",
+                lib_path.display()
+            )
+        },
+    )?)?);
+    let gfx_path = maps_path.join("gfx.jar");
+    let asset_source = JarAssetSource::new(&gfx_path).map_err(|err| {
+        anyhow::anyhow!("failed to open asset archive {}: {err}", gfx_path.display())
+    })?;
     let renderer = load_renderer(&maps_path, map_id, &sprites)?;
 
     let initial_center = renderer.center();

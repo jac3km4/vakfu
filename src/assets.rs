@@ -65,8 +65,24 @@ pub struct JarAssetSource {
 
 impl JarAssetSource {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, AssetError> {
-        let file = File::open(path)?;
-        let archive = Arc::new(Mutex::new(zip::ZipArchive::new(BufReader::new(file))?));
+        let path = path.as_ref();
+        let file = File::open(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("failed to open archive '{}': {err}", path.display()),
+            )
+        })?;
+        let archive = Arc::new(Mutex::new(
+            zip::ZipArchive::new(BufReader::new(file)).map_err(|err| match err {
+                zip::result::ZipError::Io(io_err) => {
+                    zip::result::ZipError::Io(std::io::Error::new(
+                        io_err.kind(),
+                        format!("failed to read archive '{}': {io_err}", path.display()),
+                    ))
+                }
+                other => other,
+            })?,
+        ));
         Ok(Self { archive })
     }
 }

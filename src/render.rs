@@ -178,10 +178,25 @@ pub fn load_renderer(
     let map_path = maps_path.join("gfx").join(format!("{map_id}.jar"));
     let light_path = maps_path.join("light").join(format!("{map_id}.jar"));
 
-    let map = Map::load(File::open(map_path)?)?;
+    let map_file = File::open(&map_path).map_err(|err| {
+        anyhow::anyhow!("failed to open map archive {}: {err}", map_path.display())
+    })?;
+    let map = Map::load(map_file)
+        .map_err(|err| anyhow::anyhow!("failed to load map from {}: {err}", map_path.display()))?;
 
     let light_map = if light_path.exists() {
-        LightMap::load(File::open(light_path)?)?
+        let light_file = File::open(&light_path).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to open light archive {}: {err}",
+                light_path.display()
+            )
+        })?;
+        LightMap::load(light_file).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to load light map from {}: {err}",
+                light_path.display()
+            )
+        })?
     } else {
         LightMap::default()
     };
