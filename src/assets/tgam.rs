@@ -44,7 +44,7 @@ impl<'a, C: Copy + Endianess> TryRead<'a, C> for Tgam<'a> {
         let header: [u8; 3] = bytes.read(offset, ctx)?;
         if &header != b"AGT" {
             return Err(byte::Error::BadInput {
-                err: "invalid TGA header",
+                err: "invalid TGAM header",
             });
         }
 
@@ -53,6 +53,21 @@ impl<'a, C: Copy + Endianess> TryRead<'a, C> for Tgam<'a> {
 
         let rgba_size: u32 = bytes.read(offset, ctx)?;
         let mask_size: u32 = bytes.read(offset, ctx)?;
+
+        let pow2_width = round_up_to_power_of_two(width.into()) as usize;
+        let pow2_height = round_up_to_power_of_two(height.into()) as usize;
+        let expected_rgba_len = pow2_width
+            .checked_mul(pow2_height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(byte::Error::BadInput {
+                err: "TGAM dimensions overflow",
+            })?;
+
+        if rgba_size as usize != expected_rgba_len {
+            return Err(byte::Error::BadInput {
+                err: "unexpected TGAM rgba payload size",
+            });
+        }
 
         let mask_resize: u8 = if resize_mask == 0x6D {
             bytes.read(offset, ctx)?
