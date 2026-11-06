@@ -223,10 +223,10 @@ impl Rgba {
     /// Converts the color to an array of 4 `f32` values.
     pub fn to_f32_array(self) -> [f32; 4] {
         [
-            (self.r as f32 / 255. + 0.5) * 2.,
-            (self.g as f32 / 255. + 0.5) * 2.,
-            (self.b as f32 / 255. + 0.5) * 2.,
-            (self.a as f32 / 255. + 0.5) * 2.,
+            ((self.r as f32 / 255. + 0.5) * 2.).max(0.),
+            ((self.g as f32 / 255. + 0.5) * 2.).max(0.),
+            ((self.b as f32 / 255. + 0.5) * 2.).max(0.),
+            ((self.a as f32 / 255. + 0.5) * 2.).clamp(0., 1.),
         ]
     }
 }

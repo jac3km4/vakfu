@@ -399,11 +399,12 @@ fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
 fn premultiplied_tint(color: LinearRgba) -> Color {
     // The texture is already premultiplied, but Bevy's sprite shader also
     // multiplies it by this tint. Tint opacity must attenuate RGB as well.
+    let alpha = color.alpha.clamp(0.0, 1.0);
     Color::linear_rgba(
-        color.red * color.alpha,
-        color.green * color.alpha,
-        color.blue * color.alpha,
-        color.alpha,
+        (color.red * alpha).max(0.0),
+        (color.green * alpha).max(0.0),
+        (color.blue * alpha).max(0.0),
+        alpha,
     )
 }
 
