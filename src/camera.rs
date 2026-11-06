@@ -1,5 +1,5 @@
 use bevy::input::ButtonState;
-use bevy::input::mouse::{MouseButtonInput, MouseWheel};
+use bevy::input::mouse::{MouseButtonInput, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy_egui::{EguiContext, PrimaryEguiContext};
 
@@ -86,7 +86,11 @@ pub fn camera_controller_system(
 
     for event in mouse_wheel_events.read() {
         if !is_over_egui {
-            let zoom_delta = event.y * state.zoom_sensitivity;
+            let scroll_amount = match event.unit {
+                MouseScrollUnit::Line => event.y,
+                MouseScrollUnit::Pixel => event.y / 16.0,
+            };
+            let zoom_delta = scroll_amount * state.zoom_sensitivity;
             state.target_zoom -= zoom_delta;
             state.target_zoom = state.target_zoom.clamp(1.0, 20.0);
         }
