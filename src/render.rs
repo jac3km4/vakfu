@@ -49,17 +49,25 @@ impl MapRenderer {
         let mut min_y = f32::INFINITY;
         let mut max_y = f32::NEG_INFINITY;
 
+        let total_elements = elements.len().max(1) as f32;
         let sprites = elements
             .iter()
             .enumerate()
-            .map(|(z_index, elem)| {
-                let def = &sprites[elem.definition_id()];
+            .filter_map(|(z_index, elem)| {
+                let Some(def) = sprites.get(elem.definition_id()) else {
+                    warn!("Unknown sprite definition {}", elem.definition_id());
+                    return None;
+                };
+                let Some(group) = elem.group() else {
+                    warn!("Missing group for element {}", elem.definition_id());
+                    return None;
+                };
 
                 let (x, y) = elem.screen_position();
                 let (origin_x, origin_y) = def.origin();
                 let x = x - origin_x as f32;
                 let y = y + origin_y as f32;
-                let z = z_index as f32 / elements.len() as f32;
+                let z = z_index as f32 / total_elements;
 
                 // Preserve the asset format's established mapping: size() is
                 // the sampled rectangle, texture_size() is the world-space size.
@@ -72,7 +80,7 @@ impl MapRenderer {
                 max_y = max_y.max(y);
 
                 let light_def =
-                    light_map.get_color(elem.cell_x(), elem.cell_y(), elem.group().layer() as i32);
+                    light_map.get_color(elem.cell_x(), elem.cell_y(), group.layer() as i32);
                 let [r, g, b, a] = Rgba::from(elem.color()).to_f32_array();
                 let color = LinearRgba::new(r, g, b, a);
                 let color_tinted = {
@@ -80,7 +88,7 @@ impl MapRenderer {
                     LinearRgba::new(color.red * r, color.green * g, color.blue * b, color.alpha)
                 };
 
-                Renderable {
+                Some(Renderable {
                     position: Vec3::new(x, y, z),
                     definition_id: elem.definition_id(),
                     texture_size: UVec2::new(sample_width.into(), sample_height.into()),
@@ -90,11 +98,11 @@ impl MapRenderer {
                     texture_id: def.texture_id(),
                     flip_x: def.flags().is_flip(),
                     animation: def.animation(),
-                    group: elem.group().key(),
-                    layer: elem.group().layer(),
+                    group: group.key(),
+                    layer: group.layer(),
 
                     id: None,
-                }
+                })
             })
             .collect();
 

@@ -235,6 +235,11 @@ impl MapSpriteLibrary {
         let (result, _) = MapSpriteLibrary::try_read(&bytes, LittleEndian)?;
         Ok(result)
     }
+
+    /// Gets a sprite definition by ID.
+    pub fn get(&self, id: i32) -> Option<&MapSpriteDefinition> {
+        self.elements.get(&id)
+    }
 }
 
 impl ops::Index<i32> for MapSpriteLibrary {

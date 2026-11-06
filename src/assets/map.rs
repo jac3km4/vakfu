@@ -274,13 +274,17 @@ impl<'a> MapElementDetails<'a> {
     }
 
     /// Returns the group this element belongs to.
-    pub fn group(&self) -> &'a Group {
-        &self.chunk.groups[self.element.group_index as usize]
+    pub fn group(&self) -> Option<&'a Group> {
+        self.chunk.groups.get(self.element.group_index as usize)
     }
 
     /// Returns the color of the element.
     pub fn color(&self) -> Color {
-        self.chunk.colors[self.element.color_index as usize]
+        self.chunk
+            .colors
+            .get(self.element.color_index as usize)
+            .copied()
+            .unwrap_or(Color::None)
     }
 
     /// Computes the screen position of the element.
