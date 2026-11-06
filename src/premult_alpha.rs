@@ -94,31 +94,6 @@ mod tests {
 
     use super::*;
 
-    #[derive(Default, Resource)]
-    struct SmokeFrames(usize);
-
-    fn check_smoke_phase(
-        draw_functions: Res<'_, DrawFunctions<Transparent2d>>,
-        phases: Res<'_, ViewSortedRenderPhases<Transparent2d>>,
-        replacements: Res<'_, PremultAlphaPipelines>,
-        mut frames: ResMut<'_, SmokeFrames>,
-    ) {
-        let draw_sprite = draw_functions.read().id::<DrawSprite>();
-        let mut count = 0;
-        for phase in phases.0.values() {
-            for item in phase.items.values() {
-                if item.draw_function == draw_sprite {
-                    assert_eq!(replacements.0.get(&item.pipeline), Some(&item.pipeline));
-                    count += 1;
-                }
-            }
-        }
-        if count > 0 {
-            assert_eq!(count, 1);
-            frames.0 += 1;
-        }
-    }
-
     #[test]
     fn changes_only_present_targets_blend() {
         let target = ColorTargetState {
