@@ -18,7 +18,6 @@ use render::{
 };
 use settings::{MapViewSettings, settings_ui_system};
 
-#[allow(unused)]
 mod assets;
 mod camera;
 mod premult_alpha;

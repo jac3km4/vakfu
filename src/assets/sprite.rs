@@ -2,7 +2,6 @@ use std::io::{Read, Seek};
 use std::ops;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bitfield_struct::bitfield;
 use byte::ctx::{Endianess, LittleEndian};
 use byte::{BytesExt, TryRead};
@@ -19,32 +18,38 @@ pub struct MapSpriteDefinition {
     origin_x: i16,
     /// The Y coordinate of the sprite's visual origin relative to the cell center.
     origin_y: i16,
-    /// The actual width of the image texture.
+    /// The display width of the sprite in world space.
     texture_width: u16,
-    /// The actual height of the image texture.
+    /// The display height of the sprite in world space.
     texture_height: u16,
-    /// The width when rendering the sprite.
+    /// The sampled texture rectangle width.
     render_width: u16,
-    /// The height when rendering the sprite.
+    /// The sampled texture rectangle height.
     render_height: u16,
     /// The identifier for the graphics texture to use.
     texture_id: i32,
     /// Flags conveying various rendering and behavior properties.
     flags: SpriteFlags,
     /// The perceived visual height used for logic or occlusion.
+    #[allow(dead_code)]
     visual_height: u8,
     /// A bitmask controlling the visibility state under specific views.
+    #[allow(dead_code)]
     visibility_mask: u8,
     /// A bitmask controlling export rules.
+    #[allow(dead_code)]
     export_mask: u8,
     /// The shader ID to apply when drawing the sprite.
+    #[allow(dead_code)]
     shader: u8,
     /// The number of animation frames. If 0, the sprite is not animated.
+    #[allow(dead_code)]
     frame_count: u8,
     /// The animation data, mapped out depending on `frame_count`.
     #[byte(ctx = (ctx, *frame_count))]
     animation: Animation,
     /// The identifier for the sound to play when entities interact with this sprite on the ground.
+    #[allow(dead_code)]
     ground_sound: u8,
 }
 
@@ -54,7 +59,7 @@ impl MapSpriteDefinition {
         (self.origin_x, self.origin_y)
     }
 
-    /// Returns the dimensions of the texture.
+    /// Returns the display dimensions `(width, height)` of the sprite in world space.
     pub fn texture_size(&self) -> (u16, u16) {
         (self.texture_width, self.texture_height)
     }
@@ -69,7 +74,7 @@ impl MapSpriteDefinition {
         self.flags
     }
 
-    /// Returns the dimensions of the rendered sprite.
+    /// Returns the sampled texture rectangle dimensions `(width, height)`.
     pub fn size(&self) -> (u16, u16) {
         (self.render_width, self.render_height)
     }
@@ -134,8 +139,10 @@ pub struct Frames {
     /// The target height of the frame to render.
     height: u16,
     /// The full actual width of the sprite sheet.
+    #[allow(dead_code)]
     full_width: u16,
     /// The full actual height of the sprite sheet.
+    #[allow(dead_code)]
     full_height: u16,
     /// A list of durations for each sequential frame.
     frame_durations: Vec<u16>,

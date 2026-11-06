@@ -14,9 +14,9 @@ use bevy::image::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
-pub use light::{LightCell, LightDef, LightMap};
+pub use light::LightMap;
 pub use map::{Map, MapChunk, MapElementDetails, Rgba};
-pub use sprite::{Animation, Frame, Frames, MapSpriteDefinition, MapSpriteLibrary};
+pub use sprite::{Animation, Frames, MapSpriteLibrary};
 pub use tgam::Tgam;
 use thiserror::Error;
 
@@ -100,12 +100,13 @@ impl ErasedAssetReader for JarAssetSource {
             let mut entry = archive
                 .by_name(&path.to_string_lossy())
                 .map_err(|err| match err {
-                    zip::result::ZipError::Io(error) => error,
-                    zip::result::ZipError::FileNotFound => std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("'{}' not found ({err})", path.display()),
-                    ),
-                    _ => std::io::Error::other(err),
+                    zip::result::ZipError::FileNotFound => {
+                        bevy::asset::io::AssetReaderError::NotFound(path.to_owned())
+                    }
+                    zip::result::ZipError::Io(error) => {
+                        bevy::asset::io::AssetReaderError::Io(error.into())
+                    }
+                    _ => bevy::asset::io::AssetReaderError::Io(std::io::Error::other(err).into()),
                 })?;
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes)?;
@@ -126,19 +127,19 @@ impl ErasedAssetReader for JarAssetSource {
 
     fn read_directory<'a>(
         &'a self,
-        _path: &'a std::path::Path,
+        path: &'a std::path::Path,
     ) -> bevy::tasks::BoxedFuture<
         'a,
         Result<Box<bevy::asset::io::PathStream>, bevy::asset::io::AssetReaderError>,
     > {
-        unimplemented!()
+        Box::pin(async { Err(bevy::asset::io::AssetReaderError::NotFound(path.to_owned())) })
     }
 
     fn is_directory<'a>(
         &'a self,
         _path: &'a std::path::Path,
     ) -> bevy::tasks::BoxedFuture<'a, Result<bool, bevy::asset::io::AssetReaderError>> {
-        unimplemented!()
+        Box::pin(async { Ok(false) })
     }
 
     fn read_meta_bytes<'a>(

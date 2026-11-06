@@ -1,4 +1,4 @@
-//! Premultiplied-alpha blending for Bevy 0.19.1's built-in sprite renderer.
+//! Premultiplied-alpha blending for Bevy 0.20's built-in sprite renderer.
 //!
 //! Add `PremultAlphaPlugin` after `DefaultPlugins`. This affects every `DrawSprite`
 //! item (including text rendered as sprites), not meshes or UI. Keep TGAM images

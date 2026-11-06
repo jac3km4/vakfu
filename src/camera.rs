@@ -98,6 +98,7 @@ pub fn camera_controller_system(
 }
 
 pub fn camera_system(
+    time: Res<'_, Time>,
     mut cameras: Query<'_, '_, &mut Transform, With<Camera>>,
     mut controller: ResMut<'_, CameraController>,
 ) -> Result {
@@ -116,17 +117,18 @@ pub fn camera_system(
         controller.target_position = transform.translation;
     }
 
+    let dt = time.delta_secs();
+    let pos_factor = 1.0 - (1.0 - controller.position_smoothness.clamp(0.0, 0.999)).powf(dt * 60.0);
+    let zoom_factor = 1.0 - (1.0 - controller.zoom_smoothness.clamp(0.0, 0.999)).powf(dt * 60.0);
+
     controller.current_position = smooth_position(
         controller.current_position,
         controller.target_position,
-        controller.position_smoothness,
+        pos_factor,
     );
 
-    controller.current_zoom = smooth_zoom(
-        controller.current_zoom,
-        controller.target_zoom,
-        controller.zoom_smoothness,
-    );
+    controller.current_zoom =
+        smooth_zoom(controller.current_zoom, controller.target_zoom, zoom_factor);
 
     let mut next_transform = *transform;
     next_transform.translation.x = controller.current_position.x;
@@ -137,8 +139,8 @@ pub fn camera_system(
     Ok(())
 }
 
-fn smooth_position(current: Vec3, target: Vec3, smoothness: f32) -> Vec3 {
-    let next = current.lerp(target, smoothness);
+fn smooth_position(current: Vec3, target: Vec3, factor: f32) -> Vec3 {
+    let next = current.lerp(target, factor.clamp(0.0, 1.0));
     if next.distance_squared(target) <= 0.01 * 0.01 {
         target
     } else {
@@ -146,8 +148,8 @@ fn smooth_position(current: Vec3, target: Vec3, smoothness: f32) -> Vec3 {
     }
 }
 
-fn smooth_zoom(current: f32, target: f32, smoothness: f32) -> f32 {
-    let next = current + (target - current) * smoothness;
+fn smooth_zoom(current: f32, target: f32, factor: f32) -> f32 {
+    let next = current + (target - current) * factor.clamp(0.0, 1.0);
     if (next - target).abs() <= 0.0001 {
         target
     } else {

@@ -50,16 +50,22 @@ impl Map {
 #[derive(Debug, TryRead)]
 pub struct MapChunk {
     /// The minimum X cell coordinate of the chunk's bounds.
+    #[allow(dead_code)]
     min_x: i32,
     /// The minimum Y cell coordinate of the chunk's bounds.
+    #[allow(dead_code)]
     min_y: i32,
     /// The minimum Z (altitude) coordinate of the chunk's bounds.
+    #[allow(dead_code)]
     min_z: i16,
     /// The maximum X cell coordinate of the chunk's bounds.
+    #[allow(dead_code)]
     max_x: i32,
     /// The maximum Y cell coordinate of the chunk's bounds.
+    #[allow(dead_code)]
     max_y: i32,
     /// The maximum Z (altitude) coordinate of the chunk's bounds.
+    #[allow(dead_code)]
     max_z: i16,
     /// The palette of groups used by the elements in this chunk.
     #[byte(ctx = WithSizePrefix::<_, u16>::new(ctx))]
@@ -104,6 +110,7 @@ struct MapSubChunk {
     /// The minimum relative X coordinate of the sub-chunk area.
     min_x: i8,
     /// The maximum relative X coordinate of the sub-chunk area.
+    #[allow(dead_code)]
     max_x: i8,
     /// The minimum relative Y coordinate of the sub-chunk area.
     min_y: i8,
@@ -150,7 +157,7 @@ impl<'a, C: Endianess> TryRead<'a, C> for MapSubChunk {
 struct MapCell {
     /// The map sprites/elements positioned within this cell.
     #[byte(ctx = WithSizePrefix::<_, u8>::new(ctx))]
-    elements: Vec<MapSrite>,
+    elements: Vec<MapSprite>,
 }
 
 /// A group of map elements.
@@ -161,6 +168,7 @@ pub struct Group {
     /// The layer index on which elements of this group are rendered.
     layer: u8,
     /// The identifier for the group.
+    #[allow(dead_code)]
     id: i32,
 }
 
@@ -178,7 +186,7 @@ impl Group {
 
 /// Represents the raw properties of a sprite placed on a map cell.
 #[derive(Debug, TryRead)]
-struct MapSrite {
+struct MapSprite {
     /// The Z (altitude) coordinate of the element.
     cell_z: i16,
     /// The physical height of the element.
@@ -186,6 +194,7 @@ struct MapSrite {
     /// The order or layer priority for depth sorting.
     altitude_order: u8,
     /// A generic tag value.
+    #[allow(dead_code)]
     tag: u8,
     /// The ID referring to the specific visual definition (e.g., texture mapping).
     definition_id: i32,
@@ -262,10 +271,10 @@ pub enum Color {
     Rgba(Rgba),
     /// A gradient between two RGB values.
     #[byte(tag = 0x5)]
-    RgbGradient(Rgb, Rgb),
+    RgbGradient(Rgb, #[allow(dead_code)] Rgb),
     /// A gradient between two RGBA values.
     #[byte(tag = 0x7)]
-    RgbaGradient(Rgba, Rgba),
+    RgbaGradient(Rgba, #[allow(dead_code)] Rgba),
 }
 
 impl From<Color> for Rgba {
@@ -288,13 +297,14 @@ pub struct MapElementDetails<'a> {
     /// The Y cell coordinate of the element.
     cell_y: i32,
     /// The underlying raw map sprite element properties.
-    element: &'a MapSrite,
+    element: &'a MapSprite,
     /// A reference to the parent chunk containing this element.
     chunk: &'a MapChunk,
 }
 
 impl<'a> MapElementDetails<'a> {
     /// Returns the tag of the element.
+    #[allow(dead_code)]
     pub fn tag(&self) -> u8 {
         self.element.tag
     }
@@ -324,16 +334,18 @@ impl<'a> MapElementDetails<'a> {
         iso_to_screen(self.cell_x, self.cell_y, height)
     }
 
-    /// Computes the hashcode used primarily for determining rendering depth order (z-sorting).
-    /// It relies on cell coordinates (`x` and `y`) along with the element's `altitude_order`.
+    /// Returns the X cell coordinate of the element.
     pub fn cell_x(&self) -> i32 {
         self.cell_x
     }
 
+    /// Returns the Y cell coordinate of the element.
     pub fn cell_y(&self) -> i32 {
         self.cell_y
     }
 
+    /// Computes the hashcode used primarily for determining rendering depth order (z-sorting).
+    /// It relies on cell coordinates (`x` and `y`) along with the element's `altitude_order`.
     pub fn hashcode(&self) -> i64 {
         (self.element.altitude_order as i64 & 0x1FFFi64) << 6i64
             | ((self.cell_x as i64 + 8192i64) & 0x3FFFi64) << 19i64

@@ -1,18 +1,23 @@
-use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::sync::Arc;
 
 use byte::ctx::LittleEndian;
 use byte::{BytesExt, TryRead};
+use hashbrown::HashMap;
 
 use crate::assets::AssetError;
 
 pub struct LightDef {
     pub ambiance_light: [f32; 3],
+    #[allow(dead_code)]
     pub shadows: [f32; 3],
+    #[allow(dead_code)]
     pub lights: [f32; 3],
+    #[allow(dead_code)]
     pub allow_outdoor_lighting: bool,
+    #[allow(dead_code)]
     pub has_shadows: bool,
+    #[allow(dead_code)]
     pub night_light: [f32; 3],
 }
 
@@ -147,6 +152,6 @@ impl LightMap {
     }
 }
 
-fn chunk_key(x: i32, y: i32) -> i32 {
+pub fn chunk_key(x: i32, y: i32) -> i32 {
     x << 16 | (y & 0xFFFF)
 }

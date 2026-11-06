@@ -11,8 +11,10 @@ pub struct Tgam<'a> {
     /// The underlying pixel data in RGBA format.
     rgba: &'a [u8],
     /// The mask data associated with the image.
+    #[allow(dead_code)]
     mask: &'a [u8],
     /// A value defining how the mask should be resized or mapped.
+    #[allow(dead_code)]
     mask_resize: u8,
 }
 
@@ -91,15 +93,10 @@ impl<'a, C: Copy + Endianess> TryRead<'a, C> for Tgam<'a> {
     }
 }
 
-fn round_up_to_power_of_two(value: u32) -> u32 {
+pub fn round_up_to_power_of_two(value: u32) -> u32 {
     if value < 2 {
-        return value;
+        value
+    } else {
+        value.next_power_of_two()
     }
-    let mut v = value - 1;
-    v = v | v >> 1;
-    v = v | v >> 2;
-    v = v | v >> 4;
-    v = v | v >> 8;
-    v = v | v >> 16;
-    v + 1
 }
