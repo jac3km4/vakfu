@@ -25,10 +25,44 @@ mod render;
 mod settings;
 mod util;
 
+const HELP: &str = "\
+vakfu
+
+USAGE:
+    vakfu --path <PATH> [--map <ID>]
+
+FLAGS:
+    -h, --help       Prints help information
+
+OPTIONS:
+    --path <PATH>    Path to Ankama Games' Wakfu game directory
+    --map <ID>       Initial map ID to display (default: first discovered map)
+";
+
 fn main() -> anyhow::Result<()> {
     let mut pargs = Arguments::from_env();
 
-    let game_path: PathBuf = pargs.value_from_str("--path")?;
+    if pargs.contains(["-h", "--help"]) {
+        print!("{HELP}");
+        return Ok(());
+    }
+
+    let Some(game_path) = pargs.opt_value_from_str::<_, PathBuf>("--path")? else {
+        eprint!("{HELP}");
+        bail!("missing required option '--path'");
+    };
+    let map_id_opt: Option<i32> = pargs.opt_value_from_str("--map")?;
+
+    let remaining = pargs.finish();
+    if !remaining.is_empty() {
+        let args: Vec<String> = remaining
+            .into_iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        eprint!("{HELP}");
+        bail!("unexpected arguments: {}", args.join(", "));
+    }
+
     let maps_path = game_path.join("contents").join("maps");
 
     let available_maps = match get_map_list(&maps_path) {
@@ -40,7 +74,7 @@ fn main() -> anyhow::Result<()> {
         ),
     };
 
-    let map_id = match pargs.opt_value_from_str::<&str, i32>("--map")? {
+    let map_id = match map_id_opt {
         Some(id) => {
             if !available_maps.contains(&id) {
                 bail!("map {id} not found in {}", maps_path.join("gfx").display());
