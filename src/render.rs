@@ -28,7 +28,23 @@ pub struct MapCatalog {
 }
 
 #[derive(Resource, Default)]
-pub struct PendingMapLoad(pub Option<Task<anyhow::Result<(i32, MapRenderer)>>>);
+pub struct PendingMapLoad {
+    task: Option<(i32, Task<anyhow::Result<MapRenderer>>)>,
+}
+
+impl PendingMapLoad {
+    /// Returns whether a new task is needed for the latest selection.
+    fn request(&mut self, current_map_id: i32, target_map_id: i32) -> bool {
+        if target_map_id == current_map_id {
+            self.task = None;
+            return false;
+        }
+        !self
+            .task
+            .as_ref()
+            .is_some_and(|(id, _)| *id == target_map_id)
+    }
+}
 
 #[derive(Debug, Resource)]
 pub struct MapRenderer {
@@ -217,30 +233,23 @@ pub fn load_map_system(
     mut cameras: Query<'_, '_, &mut Transform, With<Camera>>,
     mut pending_load: ResMut<'_, PendingMapLoad>,
 ) {
-    let mut latest_map_id = None;
-    for &ChangeMapEvent(map_id) in events.read() {
-        if map_id != catalog.current_map_id {
-            latest_map_id = Some(map_id);
-        }
-    }
-
-    if let Some(target_map_id) = latest_map_id {
+    if let Some(&ChangeMapEvent(target_map_id)) = events.read().last()
+        && pending_load.request(catalog.current_map_id, target_map_id)
+    {
         let pool = AsyncComputeTaskPool::get();
         let maps_path = catalog.maps_path.clone();
         let sprites = catalog.sprites.clone();
-        let task = pool.spawn(async move {
-            let renderer = load_renderer(&maps_path, target_map_id, &sprites)?;
-            Ok((target_map_id, renderer))
-        });
-        pending_load.0 = Some(task);
+        let task = pool.spawn(async move { load_renderer(&maps_path, target_map_id, &sprites) });
+        pending_load.task = Some((target_map_id, task));
     }
 
-    if let Some(ref mut task) = pending_load.0
+    if let Some((map_id, task)) = &mut pending_load.task
         && let Some(result) = future::block_on(future::poll_once(task))
     {
-        pending_load.0 = None;
+        let map_id = *map_id;
+        pending_load.task = None;
         match result {
-            Ok((map_id, new_renderer)) => {
+            Ok(new_renderer) => {
                 render_state.despawn_visible(&mut commands);
                 let center = new_renderer.center();
                 camera_controller.current_position = Vec3::new(center.x, center.y, 0.0);
@@ -254,7 +263,7 @@ pub fn load_map_system(
                 info!("Switched to map {map_id}");
             }
             Err(err) => {
-                error!("Failed to load map: {err}");
+                error!("Failed to load map {map_id}: {err}");
             }
         }
     }
@@ -473,6 +482,60 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    fn pending_task(pool: &bevy::tasks::TaskPool) -> Task<anyhow::Result<MapRenderer>> {
+        pool.spawn(future::pending())
+    }
+
+    #[test]
+    fn selecting_current_map_cancels_pending_switch() {
+        use byte::TryRead;
+        use byte::ctx::LittleEndian;
+
+        let pool = bevy::tasks::TaskPool::new();
+        let (sprites, _) = MapSpriteLibrary::try_read(&0u32.to_le_bytes(), LittleEndian).unwrap();
+        let mut app = App::new();
+        app.add_message::<ChangeMapEvent>()
+            .insert_resource(MapCatalog {
+                maps_path: std::path::PathBuf::new(),
+                sprites: Arc::new(sprites),
+                available_maps: vec![1, 2],
+                current_map_id: 1,
+            })
+            .insert_resource(MapRenderer {
+                rtree: RTree::new(),
+                last_seen: HashSet::new(),
+                spare_seen: HashSet::new(),
+                sprite_assets: HashMap::new(),
+                center: Vec2::ZERO,
+            })
+            .insert_resource(CameraController::default())
+            .insert_resource(PendingMapLoad {
+                task: Some((2, pending_task(&pool))),
+            })
+            .add_systems(Update, load_map_system);
+
+        // The last selection wins, including when it is the displayed map.
+        app.world_mut().write_message(ChangeMapEvent(2));
+        app.world_mut().write_message(ChangeMapEvent(1));
+        app.update();
+        assert!(app.world().resource::<PendingMapLoad>().task.is_none());
+        assert_eq!(app.world().resource::<MapCatalog>().current_map_id, 1);
+    }
+
+    #[test]
+    fn repeated_pending_map_selection_keeps_existing_task() {
+        let pool = bevy::tasks::TaskPool::new();
+        let mut pending = PendingMapLoad {
+            task: Some((2, pending_task(&pool))),
+        };
+        assert!(!pending.request(1, 2));
+        assert_eq!(pending.task.as_ref().unwrap().0, 2);
+        assert!(pending.request(1, 3));
+        assert!(!pending.request(1, 1));
+        assert!(pending.task.is_none());
+        assert!(pending.request(1, 2));
+    }
 
     #[test]
     fn test_frame_index_calculations() {
