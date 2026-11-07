@@ -369,6 +369,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn renderer_center_is_finite_when_all_elements_are_skipped() {
+        use byte::ctx::LittleEndian;
+
+        use crate::assets::{LightMap, MapSpriteLibrary};
+        use crate::render::MapRenderer;
+
+        let map = Map {
+            chunks: vec![MapChunk {
+                min_x: 0,
+                min_y: 0,
+                min_z: 0,
+                max_x: 1,
+                max_y: 1,
+                max_z: 0,
+                groups: vec![],
+                colors: vec![],
+                map_x: 0,
+                map_y: 0,
+                sub_chunks: vec![MapSubChunk {
+                    min_x: 0,
+                    max_x: 1,
+                    min_y: 0,
+                    max_y: 1,
+                    cells: vec![MapCell {
+                        elements: vec![MapSprite {
+                            cell_z: 0,
+                            height: 0,
+                            altitude_order: 0,
+                            tag: 0,
+                            definition_id: 1,
+                            group_index: 0,
+                            color_index: 0,
+                        }],
+                    }],
+                }],
+            }],
+        };
+        let (sprites, _) = MapSpriteLibrary::try_read(&0u32.to_le_bytes(), LittleEndian).unwrap();
+        assert_eq!(map.chunks()[0].elements().count(), 1);
+        let renderer = MapRenderer::new(&map, &sprites, &LightMap::default());
+        assert_eq!(renderer.center(), bevy::prelude::Vec2::ZERO);
+    }
+
+    #[test]
     fn test_iso_to_screen_origin() {
         let (x, y) = iso_to_screen(0, 0, 0);
         assert_eq!(x, 0.0);

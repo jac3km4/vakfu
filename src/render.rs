@@ -54,7 +54,7 @@ impl MapRenderer {
         let mut max_y = f32::NEG_INFINITY;
 
         let total_elements = elements.len().max(1) as f32;
-        let sprites = elements
+        let sprites: Vec<_> = elements
             .iter()
             .enumerate()
             .filter_map(|(z_index, elem)| {
@@ -110,7 +110,7 @@ impl MapRenderer {
             })
             .collect();
 
-        let center = if elements.is_empty() {
+        let center = if sprites.is_empty() {
             Vec2::ZERO
         } else {
             Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5)
