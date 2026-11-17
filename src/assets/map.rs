@@ -347,10 +347,30 @@ impl<'a> MapElementDetails<'a> {
     /// Computes the hashcode used primarily for determining rendering depth order (z-sorting).
     /// It relies on cell coordinates (`x` and `y`) along with the element's `altitude_order`.
     pub fn hashcode(&self) -> i64 {
-        (self.element.altitude_order as i64 & 0x1FFFi64) << 6i64
-            | ((self.cell_x as i64 + 8192i64) & 0x3FFFi64) << 19i64
-            | ((self.cell_y as i64 + 8192i64) & 0x3FFFi64) << 34i64
+        element_hashcode(self.cell_x, self.cell_y, self.element.altitude_order)
     }
+
+    /// Returns the Z (altitude) coordinate of the element.
+    pub fn cell_z(&self) -> i16 {
+        self.element.cell_z
+    }
+
+    /// Returns the physical height of the element.
+    pub fn height(&self) -> u8 {
+        self.element.height
+    }
+
+    /// Returns the altitude order of the element.
+    pub fn altitude_order(&self) -> u8 {
+        self.element.altitude_order
+    }
+}
+
+/// Computes the depth-sorting hashcode from cell coordinates and `altitude_order`.
+pub fn element_hashcode(cell_x: i32, cell_y: i32, altitude_order: u8) -> i64 {
+    (altitude_order as i64 & 0x1FFFi64) << 6i64
+        | ((cell_x as i64 + 8192i64) & 0x3FFFi64) << 19i64
+        | ((cell_y as i64 + 8192i64) & 0x3FFFi64) << 34i64
 }
 
 /// Converts isometric coordinates `(x, y)` and `height` to screen coordinates.
@@ -362,6 +382,30 @@ pub fn iso_to_screen(x: i32, y: i32, height: i32) -> (f32, f32) {
     let fx = ((x - y) * CELL_WIDTH) as f32 / 2.;
     let fy = ((-(x + y) * CELL_HEIGHT) as f32 / 2.) + (height * ELEVATION_UNIT) as f32;
     (fx, fy)
+}
+
+/// Converts world/screen coordinates `(wx, wy)` at a given `height` back to the nearest isometric cell `(x, y)`.
+pub fn screen_to_iso(wx: f32, wy: f32, height: i32) -> (i32, i32) {
+    let half_w = CELL_WIDTH as f32 / 2.0;
+    let half_h = CELL_HEIGHT as f32 / 2.0;
+    let dx = wx / half_w;
+    let sx = -((wy - (height * ELEVATION_UNIT) as f32) / half_h);
+    let x = ((dx + sx) * 0.5).round() as i32;
+    let y = ((sx - dx) * 0.5).round() as i32;
+    (x, y)
+}
+
+/// Returns the 4 world-space corner vertices `[top, right, bottom, left]` of an isometric cell diamond.
+pub fn iso_cell_diamond(x: i32, y: i32, height: i32) -> [(f32, f32); 4] {
+    let (cx, cy) = iso_to_screen(x, y, height);
+    let half_w = CELL_WIDTH as f32 / 2.0;
+    let half_h = CELL_HEIGHT as f32 / 2.0;
+    [
+        (cx, cy + half_h),
+        (cx + half_w, cy),
+        (cx, cy - half_h),
+        (cx - half_w, cy),
+    ]
 }
 
 #[cfg(test)]

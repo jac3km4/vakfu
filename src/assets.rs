@@ -15,8 +15,11 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
 pub use light::LightMap;
-pub use map::{Map, MapChunk, MapElementDetails, Rgba};
-pub use sprite::{Animation, Frames, MapSpriteLibrary};
+pub use map::{
+    Map, MapChunk, MapElementDetails, Rgba, element_hashcode, iso_cell_diamond, iso_to_screen,
+    screen_to_iso,
+};
+pub use sprite::{Animation, Frames, MapSpriteDefinition, MapSpriteLibrary};
 pub use tgam::Tgam;
 use thiserror::Error;
 
@@ -48,7 +51,7 @@ impl AssetLoader for TgamLoader {
             TextureDimension::D2,
             tgam.rgba().to_vec(),
             TextureFormat::Rgba8Unorm,
-            RenderAssetUsages::RENDER_WORLD,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         );
         Ok(img)
     }

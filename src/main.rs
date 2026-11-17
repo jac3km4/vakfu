@@ -4,26 +4,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::bail;
-use assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::CameraUpdateSystems;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
-use camera::{CameraController, camera_controller_system, camera_system};
 use pico_args::Arguments;
-use render::{
+use vakfu::assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
+use vakfu::camera::{CameraController, camera_controller_system, camera_system};
+use vakfu::premult_alpha;
+use vakfu::render::{
     ChangeMapEvent, MapCatalog, PendingMapLoad, animation_system, load_map_system, load_renderer,
     rendering_system,
 };
-use settings::{MapViewSettings, settings_ui_system};
-
-mod assets;
-mod camera;
-mod premult_alpha;
-mod render;
-mod settings;
-mod util;
+use vakfu::settings::{MapViewSettings, settings_ui_system};
 
 const HELP: &str = "\
 vakfu

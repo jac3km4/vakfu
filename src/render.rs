@@ -11,7 +11,8 @@ use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
-    Animation, Frames, LightMap, Map, MapChunk, MapElementDetails, MapSpriteLibrary, Rgba,
+    Animation, Frames, LightMap, Map, MapChunk, MapElementDetails, MapSpriteDefinition,
+    MapSpriteLibrary, Rgba, element_hashcode, iso_to_screen,
 };
 use crate::camera::CameraController;
 use crate::settings::MapViewSettings;
@@ -49,10 +50,15 @@ impl PendingMapLoad {
 #[derive(Debug, Resource)]
 pub struct MapRenderer {
     rtree: RTree<Renderable>,
+    uid_envelopes: HashMap<u64, AABB<(f32, f32)>>,
+    next_uid: u64,
     last_seen: HashSet<Entity>,
     spare_seen: HashSet<Entity>,
+    pending_despawns: Vec<Entity>,
     sprite_assets: HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
     center: Vec2,
+    used_definitions: Vec<i32>,
+    available_layers: Vec<u8>,
 }
 
 impl MapRenderer {
@@ -69,8 +75,13 @@ impl MapRenderer {
         let mut min_y = f32::INFINITY;
         let mut max_y = f32::NEG_INFINITY;
 
+        let mut used_defs_set = HashSet::new();
+        let mut layers_set = HashSet::new();
+        let mut uid_envelopes = HashMap::with_capacity(elements.len());
+        let mut next_uid = 1u64;
+
         let total_elements = elements.len().max(1) as f32;
-        let sprites: Vec<_> = elements
+        let renderables: Vec<_> = elements
             .iter()
             .enumerate()
             .filter_map(|(z_index, elem)| {
@@ -87,7 +98,7 @@ impl MapRenderer {
                 let (origin_x, origin_y) = def.origin();
                 let x = x - origin_x as f32;
                 let y = y + origin_y as f32;
-                let z = z_index as f32 / total_elements;
+                let z = (z_index as f32 / total_elements) * 500.0;
 
                 // Preserve the asset format's established mapping: size() is
                 // the sampled rectangle, texture_size() is the world-space size.
@@ -108,9 +119,23 @@ impl MapRenderer {
                     LinearRgba::new(color.red * r, color.green * g, color.blue * b, color.alpha)
                 };
 
-                Some(Renderable {
-                    position: Vec3::new(x, y, z),
+                let uid = next_uid;
+                next_uid += 1;
+
+                used_defs_set.insert(elem.definition_id());
+                layers_set.insert(group.layer());
+
+                let renderable = Renderable {
+                    uid,
                     definition_id: elem.definition_id(),
+                    position: Vec3::new(x, y, z),
+                    origin: (origin_x, origin_y),
+                    cell_x: elem.cell_x(),
+                    cell_y: elem.cell_y(),
+                    cell_z: elem.cell_z(),
+                    height: elem.height(),
+                    altitude_order: elem.altitude_order(),
+                    hashcode: elem.hashcode(),
                     texture_size: UVec2::new(sample_width.into(), sample_height.into()),
                     render_size: UVec2::new(display_width.into(), display_height.into()),
                     color,
@@ -122,22 +147,34 @@ impl MapRenderer {
                     layer: group.layer(),
 
                     id: None,
-                })
+                };
+                uid_envelopes.insert(uid, renderable.envelope());
+                Some(renderable)
             })
             .collect();
 
-        let center = if sprites.is_empty() {
+        let center = if renderables.is_empty() {
             Vec2::ZERO
         } else {
             Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5)
         };
 
+        let mut used_definitions: Vec<i32> = used_defs_set.into_iter().collect();
+        used_definitions.sort_unstable();
+        let mut available_layers: Vec<u8> = layers_set.into_iter().collect();
+        available_layers.sort_unstable();
+
         Self {
-            rtree: RTree::bulk_load(sprites),
+            rtree: RTree::bulk_load(renderables),
+            uid_envelopes,
+            next_uid,
             last_seen: HashSet::new(),
             spare_seen: HashSet::new(),
+            pending_despawns: Vec::new(),
             sprite_assets: HashMap::new(),
             center,
+            used_definitions,
+            available_layers,
         }
     }
 
@@ -145,8 +182,256 @@ impl MapRenderer {
         self.center
     }
 
+    pub fn element_count(&self) -> usize {
+        self.rtree.size()
+    }
+
+    pub fn used_definitions(&self) -> &[i32] {
+        &self.used_definitions
+    }
+
+    pub fn available_layers(&self) -> &[u8] {
+        &self.available_layers
+    }
+
+    pub fn allocate_uid(&mut self) -> u64 {
+        let uid = self.next_uid;
+        self.next_uid += 1;
+        uid
+    }
+
+    pub fn compute_z_for(&self, envelope: AABB<(f32, f32)>, hashcode: i64, ignore_uid: Option<u64>) -> f32 {
+        let mut max_below: Option<f32> = None;
+        let mut min_above: Option<f32> = None;
+        for other in self.rtree.locate_in_envelope_intersecting(envelope) {
+            if Some(other.uid) == ignore_uid {
+                continue;
+            }
+            if other.hashcode <= hashcode {
+                max_below = Some(max_below.map_or(other.position.z, |v| v.max(other.position.z)));
+            } else {
+                min_above = Some(min_above.map_or(other.position.z, |v| v.min(other.position.z)));
+            }
+        }
+        match (max_below, min_above) {
+            (Some(b), Some(a)) if b + 1e-4 < a => (b + a) * 0.5,
+            (Some(b), _) => b + 0.01,
+            (None, Some(a)) => a - 0.01,
+            (None, None) => 250.0,
+        }
+    }
+
+    /// Computes a Z strictly in front of `min_z`, tucked cleanly below any element already above `min_z`.
+    pub fn compute_z_above(
+        &self,
+        min_z: f32,
+        envelope: AABB<(f32, f32)>,
+        ignore_uid: Option<u64>,
+    ) -> f32 {
+        let mut next_above: Option<f32> = None;
+        for other in self.rtree.locate_in_envelope_intersecting(envelope) {
+            if Some(other.uid) == ignore_uid {
+                continue;
+            }
+            if other.position.z > min_z + 1e-5 {
+                next_above = Some(next_above.map_or(other.position.z, |v| v.min(other.position.z)));
+            }
+        }
+        match next_above {
+            Some(a) if min_z + 1e-4 < a => (min_z + a) * 0.5,
+            _ => min_z + 0.01,
+        }
+    }
+
+    pub fn frontmost_z_for(&self, envelope: AABB<(f32, f32)>, ignore_uid: Option<u64>) -> f32 {
+        self.rtree
+            .locate_in_envelope_intersecting(envelope)
+            .filter(|other| Some(other.uid) != ignore_uid)
+            .map(|other| other.position.z)
+            .reduce(f32::max)
+            .map_or(250.0, |z| z + 0.01)
+    }
+
+    pub fn backmost_z_for(&self, envelope: AABB<(f32, f32)>, ignore_uid: Option<u64>) -> f32 {
+        self.rtree
+            .locate_in_envelope_intersecting(envelope)
+            .filter(|other| Some(other.uid) != ignore_uid)
+            .map(|other| other.position.z)
+            .reduce(f32::min)
+            .map_or(0.0, |z| z - 0.01)
+    }
+
+    pub fn default_ground_z(&self) -> i16 {
+        let c = self.center;
+        let probe = AABB::from_corners((c.x - 128.0, c.y - 128.0), (c.x + 128.0, c.y + 128.0));
+        self.rtree
+            .locate_in_envelope_intersecting(probe)
+            .min_by(|a, b| a.position.z.total_cmp(&b.position.z))
+            .map_or(0, |elem| elem.cell_z)
+    }
+
+    /// Returns an `altitude_order` higher than any existing element on `(cell_x, cell_y)`.
+    pub fn next_altitude_order_at(&self, cell_x: i32, cell_y: i32) -> u8 {
+        let (sx, _) = iso_to_screen(cell_x, cell_y, 0);
+        let strip = AABB::from_corners((sx - 1024.0, -1_000_000.0), (sx + 1024.0, 1_000_000.0));
+        self.rtree
+            .locate_in_envelope_intersecting(strip)
+            .filter(|elem| elem.cell_x == cell_x && elem.cell_y == cell_y)
+            .map(|elem| elem.altitude_order)
+            .max()
+            .map_or(0, |max_alt| max_alt.saturating_add(1))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_renderable(
+        &mut self,
+        def: &MapSpriteDefinition,
+        cell_x: i32,
+        cell_y: i32,
+        cell_z: i16,
+        height: u8,
+        altitude_order: u8,
+        group: i32,
+        layer: u8,
+        color: LinearRgba,
+    ) -> Renderable {
+        let uid = self.allocate_uid();
+        let (sx, sy) = iso_to_screen(cell_x, cell_y, i32::from(cell_z) - i32::from(height));
+        let (origin_x, origin_y) = def.origin();
+        let x = sx - origin_x as f32;
+        let y = sy + origin_y as f32;
+        let (sample_width, sample_height) = def.size();
+        let (display_width, display_height) = def.texture_size();
+        let hashcode = element_hashcode(cell_x, cell_y, altitude_order);
+        let envelope = AABB::from_corners(
+            (x, y),
+            (x + f32::from(display_width), y - f32::from(display_height)),
+        );
+        let z = self.compute_z_for(envelope, hashcode, None);
+
+        Renderable {
+            uid,
+            definition_id: def.id(),
+            position: Vec3::new(x, y, z),
+            origin: (origin_x, origin_y),
+            cell_x,
+            cell_y,
+            cell_z,
+            height,
+            altitude_order,
+            hashcode,
+            texture_size: UVec2::new(sample_width.into(), sample_height.into()),
+            render_size: UVec2::new(display_width.into(), display_height.into()),
+            color,
+            color_tinted: color,
+            texture_id: def.texture_id(),
+            flip_x: def.flags().is_flip(),
+            animation: def.animation(),
+            group,
+            layer,
+            id: None,
+        }
+    }
+
+    pub fn get_element(&self, uid: u64) -> Option<&Renderable> {
+        let env = self.uid_envelopes.get(&uid)?;
+        self.rtree
+            .locate_in_envelope_intersecting(*env)
+            .find(|r| r.uid == uid)
+    }
+
+    pub fn insert_element(&mut self, mut elem: Renderable) {
+        elem.id = None;
+        let env = elem.envelope();
+        self.uid_envelopes.insert(elem.uid, env);
+        if let Err(idx) = self.used_definitions.binary_search(&elem.definition_id) {
+            self.used_definitions.insert(idx, elem.definition_id);
+        }
+        if let Err(idx) = self.available_layers.binary_search(&elem.layer) {
+            self.available_layers.insert(idx, elem.layer);
+        }
+        self.rtree.insert(elem);
+    }
+
+    pub fn remove_element(&mut self, uid: u64) -> Option<Renderable> {
+        let env = self.uid_envelopes.remove(&uid)?;
+        let target = self
+            .rtree
+            .locate_in_envelope_intersecting(env)
+            .find(|r| r.uid == uid)?
+            .clone();
+        let removed = self.rtree.remove(&target)?;
+        if let Some(entity) = removed.id {
+            self.last_seen.remove(&entity);
+            self.pending_despawns.push(entity);
+        }
+        Some(removed)
+    }
+
+    #[cfg(test)]
+    pub fn attach_entity_for_test(&mut self, uid: u64, entity: Entity) {
+        if let Some(&env) = self.uid_envelopes.get(&uid)
+            && let Some(elem) = self
+                .rtree
+                .locate_in_envelope_intersecting_mut(env)
+                .find(|r| r.uid == uid)
+        {
+            elem.id = Some(entity);
+        }
+    }
+
+    pub fn update_element(&mut self, mut elem: Renderable) -> Option<Renderable> {
+        let env = self.uid_envelopes.remove(&elem.uid)?;
+        let target = self
+            .rtree
+            .locate_in_envelope_intersecting(env)
+            .find(|r| r.uid == elem.uid)?
+            .clone();
+        let old = self.rtree.remove(&target)?;
+        elem.id = old.id;
+        let new_env = elem.envelope();
+        self.uid_envelopes.insert(elem.uid, new_env);
+        if let Err(idx) = self.available_layers.binary_search(&elem.layer) {
+            self.available_layers.insert(idx, elem.layer);
+        }
+        self.rtree.insert(elem);
+        Some(old)
+    }
+
+    pub fn pick_at_world(
+        &self,
+        wx: f32,
+        wy: f32,
+        settings: &MapViewSettings,
+        images: &Assets<Image>,
+        elapsed: Duration,
+    ) -> Option<&Renderable> {
+        let mut candidates: Vec<&Renderable> = self
+            .rtree
+            .locate_in_envelope_intersecting(AABB::from_point((wx, wy)))
+            .filter(|elem| {
+                (!settings.layer_filter_on || settings.layer == elem.layer)
+                    && (!settings.group_filter_on || settings.group == elem.group / 1000)
+            })
+            .collect();
+        candidates.sort_by(|a, b| b.position.z.total_cmp(&a.position.z));
+        candidates
+            .iter()
+            .copied()
+            .find(|elem| is_opaque_at_world(elem, wx, wy, &self.sprite_assets, images, elapsed, 8))
+            .or_else(|| {
+                candidates.into_iter().find(|elem| {
+                    is_opaque_at_world(elem, wx, wy, &self.sprite_assets, images, elapsed, 1)
+                })
+            })
+    }
+
     pub fn despawn_visible(&mut self, commands: &mut Commands<'_, '_>) {
-        for entity in self.last_seen.drain() {
+        for entity in self
+            .last_seen
+            .drain()
+            .chain(self.pending_despawns.drain(..))
+        {
             if commands.get_entity(entity).is_ok() {
                 commands.entity(entity).despawn();
             }
@@ -154,21 +439,50 @@ impl MapRenderer {
     }
 }
 
-#[derive(Debug)]
-struct Renderable {
-    definition_id: i32,
-    position: Vec3,
-    texture_size: UVec2,
-    render_size: UVec2,
-    color: LinearRgba,
-    color_tinted: LinearRgba,
-    texture_id: i32,
-    flip_x: bool,
-    animation: Animation,
-    group: i32,
-    layer: u8,
+#[derive(Debug, Clone)]
+pub struct Renderable {
+    pub uid: u64,
+    pub definition_id: i32,
+    pub position: Vec3,
+    pub origin: (i16, i16),
+    pub cell_x: i32,
+    pub cell_y: i32,
+    pub cell_z: i16,
+    pub height: u8,
+    pub altitude_order: u8,
+    pub hashcode: i64,
+    pub texture_size: UVec2,
+    pub render_size: UVec2,
+    pub color: LinearRgba,
+    pub color_tinted: LinearRgba,
+    pub texture_id: i32,
+    pub flip_x: bool,
+    pub animation: Animation,
+    pub group: i32,
+    pub layer: u8,
 
-    id: Option<Entity>,
+    pub id: Option<Entity>,
+}
+
+impl PartialEq for Renderable {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+    }
+}
+
+impl Renderable {
+    /// Recomputes world-space `position` and `hashcode` from `cell_x`, `cell_y`, `cell_z`, `height`, `altitude_order`.
+    pub fn recompute_position(&mut self, renderer: &MapRenderer) {
+        let (sx, sy) = iso_to_screen(
+            self.cell_x,
+            self.cell_y,
+            i32::from(self.cell_z) - i32::from(self.height),
+        );
+        self.position.x = sx - self.origin.0 as f32;
+        self.position.y = sy + self.origin.1 as f32;
+        self.hashcode = element_hashcode(self.cell_x, self.cell_y, self.altitude_order);
+        self.position.z = renderer.compute_z_for(self.envelope(), self.hashcode, Some(self.uid));
+    }
 }
 
 impl RTreeObject for Renderable {
@@ -277,8 +591,16 @@ pub fn rendering_system(
     mut atlas_layouts: ResMut<'_, Assets<TextureAtlasLayout>>,
     mut render_state: ResMut<'_, MapRenderer>,
     settings: Res<'_, MapViewSettings>,
-    mut sprites: Query<'_, '_, &mut Sprite>,
+    mut sprites: Query<'_, '_, (&mut Sprite, &mut Transform), Without<Camera>>,
 ) -> Result {
+    if !render_state.pending_despawns.is_empty() {
+        for entity in render_state.pending_despawns.drain(..) {
+            if commands.get_entity(entity).is_ok() {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+
     let Ok((camera, transform)) = cameras.single() else {
         return Ok(());
     };
@@ -294,7 +616,7 @@ pub fn rendering_system(
         return Ok(());
     };
 
-    let update_color = settings.is_changed();
+    let sync_existing = settings.is_changed() || render_state.is_changed();
     let MapRenderer {
         rtree,
         last_seen,
@@ -314,7 +636,7 @@ pub fn rendering_system(
 
         let entity = match elem.id {
             Some(id) if commands.get_entity(id).is_ok() => {
-                if update_color && let Ok(mut sprite) = sprites.get_mut(id) {
+                if sync_existing && let Ok((mut sprite, mut elem_transform)) = sprites.get_mut(id) {
                     let active_color = if settings.enable_light {
                         elem.color_tinted
                     } else {
@@ -323,6 +645,9 @@ pub fn rendering_system(
                     let color = premultiplied_tint(active_color);
                     if sprite.color != color {
                         sprite.color = color;
+                    }
+                    if elem_transform.translation != elem.position {
+                        elem_transform.translation = elem.position;
                     }
                 }
                 id
@@ -442,7 +767,74 @@ fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
         .saturating_sub(1)
 }
 
-fn premultiplied_tint(color: LinearRgba) -> Color {
+fn is_opaque_at_world(
+    elem: &Renderable,
+    wx: f32,
+    wy: f32,
+    sprite_assets: &HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
+    images: &Assets<Image>,
+    elapsed: Duration,
+    alpha_threshold: u8,
+) -> bool {
+    if elem.color.alpha <= 0.01 {
+        return false;
+    }
+    let (rw, rh) = (elem.render_size.x, elem.render_size.y);
+    if rw == 0 || rh == 0 {
+        return false;
+    }
+    let mut u = (wx - elem.position.x) / (rw as f32);
+    let v = (elem.position.y - wy) / (rh as f32);
+    if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+        return false;
+    }
+    if elem.flip_x {
+        u = 1.0 - u;
+    }
+
+    let Some((img_handle, _)) = sprite_assets.get(&elem.definition_id) else {
+        return true;
+    };
+    let Some(img) = images.get(img_handle) else {
+        return true;
+    };
+    let Some(data) = img.data.as_ref() else {
+        return true;
+    };
+
+    let (min_x, min_y, sub_w, sub_h) = match &elem.animation {
+        Animation::None => (0, 0, elem.texture_size.x, elem.texture_size.y),
+        Animation::Frames(frames) => {
+            let idx = frame_index(frames, elapsed);
+            if let Some(frame) = frames.iter().nth(idx) {
+                (
+                    u32::from(frame.x),
+                    u32::from(frame.y),
+                    u32::from(frames.width()),
+                    u32::from(frames.height()),
+                )
+            } else {
+                (0, 0, elem.texture_size.x, elem.texture_size.y)
+            }
+        }
+    };
+    if sub_w == 0 || sub_h == 0 {
+        return false;
+    }
+
+    let px = min_x + (u.clamp(0.0, 0.999_999) * sub_w as f32) as u32;
+    let py = min_y + (v.clamp(0.0, 0.999_999) * sub_h as f32) as u32;
+    let img_w = img.width();
+    let img_h = img.height();
+    if px >= img_w || py >= img_h {
+        return false;
+    }
+
+    let alpha_idx = ((py * img_w + px) * 4 + 3) as usize;
+    data.get(alpha_idx).is_some_and(|&a| a >= alpha_threshold)
+}
+
+pub fn premultiplied_tint(color: LinearRgba) -> Color {
     // The texture is already premultiplied, but Bevy's sprite shader also
     // multiplies it by this tint. Tint opacity must attenuate RGB as well.
     let alpha = color.alpha.clamp(0.0, 1.0);
@@ -454,13 +846,17 @@ fn premultiplied_tint(color: LinearRgba) -> Color {
     )
 }
 
-fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
-    let mut layout = TextureAtlasLayout::new_empty(renderable.texture_size);
-    match &renderable.animation {
+pub fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
+    atlas_layout_parts(renderable.texture_size, &renderable.animation)
+}
+
+pub fn atlas_layout_parts(texture_size: UVec2, animation: &Animation) -> TextureAtlasLayout {
+    let mut layout = TextureAtlasLayout::new_empty(texture_size);
+    match animation {
         Animation::None => {
             layout.add_texture(URect {
                 min: UVec2::ZERO,
-                max: renderable.texture_size,
+                max: texture_size,
             });
         }
         Animation::Frames(frames) => {
@@ -504,10 +900,15 @@ mod tests {
             })
             .insert_resource(MapRenderer {
                 rtree: RTree::new(),
+                uid_envelopes: HashMap::new(),
+                next_uid: 1,
                 last_seen: HashSet::new(),
                 spare_seen: HashSet::new(),
+                pending_despawns: Vec::new(),
                 sprite_assets: HashMap::new(),
                 center: Vec2::ZERO,
+                used_definitions: Vec::new(),
+                available_layers: Vec::new(),
             })
             .insert_resource(CameraController::default())
             .insert_resource(PendingMapLoad {
@@ -568,5 +969,187 @@ mod tests {
 
         let clamped_low = premultiplied_tint(LinearRgba::new(1.0, 1.0, 1.0, -0.5));
         assert_eq!(clamped_low, Color::linear_rgba(0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_pick_at_world_selects_frontmost_sprite_and_respects_alpha() {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::image::Image;
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+        let mut images = Assets::<Image>::default();
+
+        // 2x2 image: top-left transparent, rest opaque
+        // Pixels in RGBA: (0,0)->(0,0,0,0), (1,0)->(255,255,255,255), (0,1)->(255,255,255,255), (1,1)->(255,255,255,255)
+        let pixels = vec![
+            0, 0, 0, 0, // (0,0) transparent
+            255, 255, 255, 255, // (1,0) opaque
+            255, 255, 255, 255, // (0,1) opaque
+            255, 255, 255, 255, // (1,1) opaque
+        ];
+        let img = Image::new(
+            Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            pixels,
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        let img_handle = images.add(img);
+
+        let mut sprite_assets = HashMap::new();
+        let mut atlas_layouts = Assets::<TextureAtlasLayout>::default();
+        let layout_handle = atlas_layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(2)));
+        sprite_assets.insert(10, (img_handle, layout_handle));
+
+        // Two overlapping sprites:
+        // elem_bottom has higher Z (10.0) but is transparent at (0, 0)
+        let elem_top_z = Renderable {
+            uid: 1,
+            definition_id: 10,
+            position: Vec3::new(0.0, 20.0, 10.0),
+            origin: (0, 0),
+            cell_x: 0,
+            cell_y: 0,
+            cell_z: 0,
+            height: 0,
+            altitude_order: 1,
+            hashcode: 1,
+            texture_size: UVec2::new(2, 2),
+            render_size: UVec2::new(20, 20),
+            color: LinearRgba::WHITE,
+            color_tinted: LinearRgba::WHITE,
+            texture_id: 1,
+            flip_x: false,
+            animation: Animation::None,
+            group: 0,
+            layer: 0,
+            id: None,
+        };
+
+        // elem_solid has lower Z (5.0) and is solid (no image mapped, treated as opaque)
+        let elem_solid = Renderable {
+            uid: 2,
+            definition_id: 99, // not in sprite_assets -> treated as opaque
+            position: Vec3::new(0.0, 20.0, 5.0),
+            origin: (0, 0),
+            cell_x: 0,
+            cell_y: 0,
+            cell_z: 0,
+            height: 0,
+            altitude_order: 0,
+            hashcode: 0,
+            texture_size: UVec2::new(2, 2),
+            render_size: UVec2::new(20, 20),
+            color: LinearRgba::WHITE,
+            color_tinted: LinearRgba::WHITE,
+            texture_id: 2,
+            flip_x: false,
+            animation: Animation::None,
+            group: 0,
+            layer: 0,
+            id: None,
+        };
+
+        let mut renderer = MapRenderer {
+            rtree: RTree::bulk_load(vec![elem_top_z.clone(), elem_solid.clone()]),
+            uid_envelopes: HashMap::new(),
+            next_uid: 3,
+            last_seen: HashSet::new(),
+            spare_seen: HashSet::new(),
+            pending_despawns: Vec::new(),
+            sprite_assets,
+            center: Vec2::ZERO,
+            used_definitions: vec![10, 99],
+            available_layers: vec![0],
+        };
+        renderer.uid_envelopes.insert(1, elem_top_z.envelope());
+        renderer.uid_envelopes.insert(2, elem_solid.envelope());
+
+        let settings = MapViewSettings::default();
+
+        // Clicking at top-left (wx=2, wy=18): elem_top_z is transparent there -> picks elem_solid (uid 2)!
+        let picked_trans = renderer.pick_at_world(2.0, 18.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked_trans.map(|r| r.uid), Some(2));
+
+        // Clicking at bottom-right (wx=18, wy=2): elem_top_z is opaque there -> picks elem_top_z (uid 1)!
+        let picked_solid = renderer.pick_at_world(18.0, 2.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked_solid.map(|r| r.uid), Some(1));
+    }
+
+    #[test]
+    fn test_compute_z_above_places_cleanly_on_top() {
+        let envelope = AABB::from_corners((0.0, 0.0), (50.0, 50.0));
+        let elem1 = Renderable {
+            uid: 1,
+            definition_id: 1,
+            position: Vec3::new(0.0, 0.0, 10.0),
+            origin: (0, 0),
+            cell_x: 0,
+            cell_y: 0,
+            cell_z: 0,
+            height: 0,
+            altitude_order: 0,
+            hashcode: 0,
+            texture_size: UVec2::splat(10),
+            render_size: UVec2::splat(10),
+            color: LinearRgba::WHITE,
+            color_tinted: LinearRgba::WHITE,
+            texture_id: 1,
+            flip_x: false,
+            animation: Animation::None,
+            group: 0,
+            layer: 0,
+            id: None,
+        };
+        let elem2 = Renderable {
+            uid: 2,
+            definition_id: 1,
+            position: Vec3::new(0.0, 0.0, 20.0),
+            origin: (0, 0),
+            cell_x: 0,
+            cell_y: 0,
+            cell_z: 0,
+            height: 0,
+            altitude_order: 1,
+            hashcode: 1,
+            texture_size: UVec2::splat(10),
+            render_size: UVec2::splat(10),
+            color: LinearRgba::WHITE,
+            color_tinted: LinearRgba::WHITE,
+            texture_id: 1,
+            flip_x: false,
+            animation: Animation::None,
+            group: 0,
+            layer: 0,
+            id: None,
+        };
+
+        let renderer = MapRenderer {
+            rtree: RTree::bulk_load(vec![elem1, elem2]),
+            uid_envelopes: HashMap::new(),
+            next_uid: 3,
+            last_seen: HashSet::new(),
+            spare_seen: HashSet::new(),
+            pending_despawns: Vec::new(),
+            sprite_assets: HashMap::new(),
+            center: Vec2::ZERO,
+            used_definitions: Vec::new(),
+            available_layers: Vec::new(),
+        };
+
+        // Placing above z=10.0 should land between 10.0 and 20.0 (15.0)
+        let z_between = renderer.compute_z_above(10.0, envelope, None);
+        assert!(z_between > 10.0 && z_between < 20.0);
+
+        // Placing above z=20.0 (highest) should land above 20.0
+        let z_top = renderer.compute_z_above(20.0, envelope, None);
+        assert!(z_top > 20.0);
+
+        // frontmost_z_for should be strictly greater than max existing (20.0)
+        assert!(renderer.frontmost_z_for(envelope, None) > 20.0);
     }
 }

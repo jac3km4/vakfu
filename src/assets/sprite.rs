@@ -54,6 +54,11 @@ pub struct MapSpriteDefinition {
 }
 
 impl MapSpriteDefinition {
+    /// Returns the unique identifier of the sprite definition.
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+
     /// Returns the original coordinates `(x, y)` of the sprite.
     pub fn origin(&self) -> (i16, i16) {
         (self.origin_x, self.origin_y)
@@ -260,6 +265,21 @@ impl MapSpriteLibrary {
     /// Gets a sprite definition by ID.
     pub fn get(&self, id: i32) -> Option<&MapSpriteDefinition> {
         self.elements.get(&id)
+    }
+
+    /// Iterates over all `(id, definition)` pairs in the library.
+    pub fn iter(&self) -> impl Iterator<Item = (&i32, &MapSpriteDefinition)> {
+        self.elements.iter()
+    }
+
+    /// Returns the number of sprite definitions in the library.
+    pub fn len(&self) -> usize {
+        self.elements.len()
+    }
+
+    /// Returns `true` if the library contains no sprite definitions.
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
     }
 }
 
