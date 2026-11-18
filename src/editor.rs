@@ -179,8 +179,9 @@ pub struct EditorState {
     pub show_grid: bool,
     pub hovered_cell: Option<(i32, i32)>,
     pub hovered_world: Option<Vec2>,
-    pub palette_search: String,
+    pub palette_page: usize,
     pub palette_only_used: bool,
+    sorted_sprite_ids: Vec<i32>,
     pub map_search: String,
     egui_textures: HashMap<i32, (Handle<Image>, egui::TextureId)>,
     ghost_entity: Option<Entity>,
@@ -203,8 +204,9 @@ impl Default for EditorState {
             show_grid: true,
             hovered_cell: None,
             hovered_world: None,
-            palette_search: String::new(),
+            palette_page: 0,
             palette_only_used: true,
+            sorted_sprite_ids: Vec::new(),
             map_search: String::new(),
             egui_textures: HashMap::new(),
             ghost_entity: None,
@@ -400,8 +402,28 @@ pub fn editor_ui_system(
     });
 
     // Left Dock: Sprite Palette & Layers
-    egui::Panel::left("editor_palette_panel")
-        .default_size(240.0)
+    const PALETTE_TILE_SIZE: f32 = 36.0;
+    const PALETTE_TILE_SPACING: f32 = 4.0;
+    const PALETTE_TILE_PAD: f32 = 3.0;
+    const PALETTE_MIN_COLS: usize = 4;
+    const PALETTE_DEFAULT_COLS: usize = 5;
+
+    let palette_grid_width = |cols: usize| -> f32 {
+        cols as f32 * PALETTE_TILE_SIZE + cols.saturating_sub(1) as f32 * PALETTE_TILE_SPACING
+    };
+    let palette_panel_id = egui::Id::new("editor_palette_panel");
+    let panel_margin_x = viewport_ui.style().spacing.window_margin.sum().x;
+    let scroll_margin_x = viewport_ui.style().spacing.scroll.bar_width
+        + viewport_ui.style().spacing.scroll.bar_inner_margin
+        + viewport_ui.style().spacing.scroll.bar_outer_margin;
+    let min_panel_width =
+        palette_grid_width(PALETTE_MIN_COLS) + panel_margin_x + scroll_margin_x;
+    let default_panel_width =
+        palette_grid_width(PALETTE_DEFAULT_COLS) + panel_margin_x + scroll_margin_x;
+
+    let panel_resp = egui::Panel::left(palette_panel_id)
+        .default_size(default_panel_width)
+        .min_size(min_panel_width)
         .resizable(true)
         .show(&mut viewport_ui, |ui| {
             ui.heading("Layers");
@@ -425,65 +447,78 @@ pub fn editor_ui_system(
 
             ui.separator();
             ui.heading("Sprite Palette");
-            ui.horizontal(|ui| {
-                ui.label("🔍");
-                ui.text_edit_singleline(&mut editor.palette_search);
-                if !editor.palette_search.is_empty() && ui.small_button("✕").clicked() {
-                    editor.palette_search.clear();
-                }
-            });
-            ui.checkbox(&mut editor.palette_only_used, "Used in current map");
+            if ui
+                .checkbox(&mut editor.palette_only_used, "Used in current map")
+                .changed()
+            {
+                editor.palette_page = 0;
+            }
 
-            let search = editor.palette_search.trim().to_owned();
-            let candidate_ids: Vec<i32> = if editor.palette_only_used {
-                renderer
-                    .used_definitions()
-                    .iter()
-                    .copied()
-                    .filter(|id| {
-                        search.is_empty()
-                            || id.to_string().contains(&search)
-                            || catalog
-                                .sprites
-                                .get(*id)
-                                .is_some_and(|d| d.texture_id().to_string().contains(&search))
-                    })
-                    .take(150)
-                    .collect()
-            } else {
-                let mut ids: Vec<i32> = catalog
-                    .sprites
-                    .iter()
-                    .filter_map(|(&id, def)| {
-                        if search.is_empty()
-                            || id.to_string().contains(&search)
-                            || def.texture_id().to_string().contains(&search)
-                        {
-                            Some(id)
-                        } else {
-                            None
-                        }
-                    })
-                    .take(150)
-                    .collect();
+            const PALETTE_PAGE_SIZE: usize = 200;
+            if !editor.palette_only_used
+                && editor.sorted_sprite_ids.len() != catalog.sprites.len()
+            {
+                let mut ids: Vec<i32> = catalog.sprites.iter().map(|(&id, _)| id).collect();
                 ids.sort_unstable();
-                ids
+                editor.sorted_sprite_ids = ids;
+            }
+
+            let total_sprites = if editor.palette_only_used {
+                renderer.used_definitions().len()
+            } else {
+                editor.sorted_sprite_ids.len()
+            };
+            let total_pages = total_sprites.div_ceil(PALETTE_PAGE_SIZE).max(1);
+            editor.palette_page = editor.palette_page.min(total_pages - 1);
+            let start = editor.palette_page * PALETTE_PAGE_SIZE;
+            let end = (start + PALETTE_PAGE_SIZE).min(total_sprites);
+            let page_ids: Vec<i32> = if editor.palette_only_used {
+                renderer.used_definitions()[start..end].to_vec()
+            } else {
+                editor.sorted_sprite_ids[start..end].to_vec()
             };
 
-            ui.label(
-                egui::RichText::new(format!("Showing {} sprites", candidate_ids.len()))
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(editor.palette_page > 0, egui::Button::new("◀").small())
+                    .clicked()
+                {
+                    editor.palette_page -= 1;
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Page {}/{} ({total_sprites})",
+                        editor.palette_page + 1,
+                        total_pages
+                    ))
                     .small()
                     .weak(),
-            );
+                );
+                if ui
+                    .add_enabled(
+                        editor.palette_page + 1 < total_pages,
+                        egui::Button::new("▶").small(),
+                    )
+                    .clicked()
+                {
+                    editor.palette_page += 1;
+                }
+            });
 
+            let mut actual_grid_avail = 0.0_f32;
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 .show(ui, |ui| {
-                    let tile_size = 58.0;
+                    ui.spacing_mut().item_spacing = EguiVec2::splat(PALETTE_TILE_SPACING);
                     let avail = ui.available_width();
-                    let cols = ((avail / (tile_size + 6.0)).floor() as usize).max(1);
+                    actual_grid_avail = avail;
+                    let cols = (((avail + PALETTE_TILE_SPACING)
+                        / (PALETTE_TILE_SIZE + PALETTE_TILE_SPACING))
+                        .floor() as usize)
+                        .max(PALETTE_MIN_COLS);
 
-                    for chunk in candidate_ids.chunks(cols) {
+                    for chunk in page_ids.chunks(cols) {
                         ui.horizontal(|ui| {
                             for &def_id in chunk {
                                 let Some(def) = catalog.sprites.get(def_id) else {
@@ -497,7 +532,7 @@ pub fn editor_ui_system(
                                 let is_selected = editor.brush.definition_id == Some(def_id);
 
                                 let (rect, response) = ui.allocate_exact_size(
-                                    EguiVec2::splat(tile_size),
+                                    EguiVec2::splat(PALETTE_TILE_SIZE),
                                     Sense::click(),
                                 );
 
@@ -518,7 +553,7 @@ pub fn editor_ui_system(
                                     );
                                 }
 
-                                let inner = rect.shrink(4.0);
+                                let inner = rect.shrink(PALETTE_TILE_PAD);
                                 let (sw, sh) = def.size();
                                 let (dw, dh) = def.texture_size();
                                 let aspect = if dh > 0 {
@@ -584,7 +619,27 @@ pub fn editor_ui_system(
                         });
                     }
                 });
+            actual_grid_avail
         });
+
+    if !viewport_ui.ctx().input(|i| i.pointer.any_down()) {
+        let actual_grid_avail = panel_resp.inner;
+        let overhead = (panel_resp.response.rect.width() - actual_grid_avail).max(0.0);
+        let snapped_cols = (((actual_grid_avail + PALETTE_TILE_SPACING)
+            / (PALETTE_TILE_SIZE + PALETTE_TILE_SPACING))
+            .round() as usize)
+            .max(PALETTE_MIN_COLS);
+        let snapped_width = palette_grid_width(snapped_cols) + overhead;
+        if (panel_resp.response.rect.width() - snapped_width).abs() > 0.5
+            && let Some(mut state) =
+                egui::panel::PanelState::load(viewport_ui.ctx(), palette_panel_id)
+        {
+            state.outer_rect.set_width(snapped_width);
+            viewport_ui
+                .ctx()
+                .data_mut(|d| d.insert_persisted(palette_panel_id, state));
+        }
+    }
 
     // Right Dock: Inspector / Brush
     egui::Panel::right("editor_inspector_panel")
@@ -1266,17 +1321,19 @@ pub fn editor_overlay_system(
     let mut lines = Vec::with_capacity(48);
     let eff_z = i32::from(editor.effective_brush_z());
 
-    // Subtle isometric grid around hovered cell or camera
-    if editor.show_grid {
-        let center_cell = editor.hovered_cell.unwrap_or_else(|| {
-            cameras
-                .single()
-                .map(|t| screen_to_iso(t.translation.x, t.translation.y, eff_z))
-                .unwrap_or((0, 0))
-        });
-        let z = eff_z;
-        let radius: i32 = 8;
-        let grid_color = Color::srgba(1.0, 1.0, 1.0, 0.09);
+    // Subtle world-anchored isometric grid when dragging an element
+    if editor.show_grid && editor.drag_state.is_some() {
+        let z = if editor.brush.snap_to_surface {
+            0
+        } else {
+            i32::from(editor.brush.target_z)
+        };
+        let center_cell = cameras
+            .single()
+            .map(|t| screen_to_iso(t.translation.x, t.translation.y, z))
+            .unwrap_or((0, 0));
+        let radius: i32 = (14.0 * zoom).clamp(10.0, 26.0) as i32;
+        let grid_color = Color::srgba(1.0, 1.0, 1.0, 0.03);
         let (cx0, cy0) = iso_to_screen(0, 0, 0);
         let (cx1, cy1) = iso_to_screen(1, 0, 0);
         let dx_off_x = (cx1 - cx0) * 0.5;
