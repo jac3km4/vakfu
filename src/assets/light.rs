@@ -180,6 +180,98 @@ mod tests {
     use super::*;
 
     #[test]
+    fn light_cell_parses_layers_and_decodes_colours() {
+        let ambiance = 255i32 | (128 << 8); // r=255, g=128, b=0
+        let shadow = 0x0080_8080i32; // r=128, g=128, b=128
+        let light = 255i32; // r=255, g=0, b=0
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&2i16.to_le_bytes()); // x -> 36
+        bytes.extend_from_slice(&3i16.to_le_bytes()); // y -> 54
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // defcount
+        bytes.push(1); // allow_outdoor_lighting
+        bytes.extend_from_slice(&ambiance.to_le_bytes());
+        bytes.extend_from_slice(&shadow.to_le_bytes());
+        bytes.extend_from_slice(&light.to_le_bytes());
+        bytes.extend_from_slice(&1i16.to_le_bytes()); // layer count (unused)
+        bytes.extend_from_slice(&1i16.to_le_bytes()); // lcount
+        bytes.extend_from_slice(&1620u16.to_le_bytes()); // lookup hash
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // layer index
+
+        let (cell, consumed) = LightCell::try_read(&bytes, LittleEndian).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!((cell.cell_x, cell.cell_y), (36, 54));
+
+        let def = cell.layer_colors.get(&1620).unwrap();
+        assert!(def.allow_outdoor_lighting);
+        assert_eq!(
+            def.ambiance_light,
+            [2.0, 128.0 / 255.0 * 2.0, 0.0]
+        );
+        assert_eq!(def.shadows, [128.0 / 255.0; 3]);
+        assert_eq!(def.lights, [0.5, -0.5, -0.5]);
+        assert!(def.has_shadows);
+        assert_eq!(def.night_light, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn light_map_resolves_layer_hash_and_falls_back() {
+        let cell = LightCell {
+            cell_x: 36,
+            cell_y: 54,
+            layer_colors: HashMap::from([(
+                1620,
+                Arc::new(LightDef {
+                    ambiance_light: [0.5; 3],
+                    ..LightDef::DEFAULT
+                }),
+            )]),
+        };
+        let map = LightMap {
+            light_maps: HashMap::from([(chunk_key(2, 3), cell)]),
+        };
+
+        // `get_color` reconstructs the (x + (y + layer * 18) * 18) lookup hash.
+        assert_eq!(map.get_color(36, 54, 5).ambiance_light, [0.5; 3]);
+        // A different layer and a neighbouring cell miss and use the default.
+        assert_eq!(
+            map.get_color(36, 54, 4).ambiance_light,
+            LightDef::DEFAULT.ambiance_light
+        );
+        assert_eq!(
+            map.get_color(37, 54, 5).ambiance_light,
+            LightDef::DEFAULT.ambiance_light
+        );
+    }
+
+    #[test]
+    fn effective_day_color_applies_shadows_then_clamps() {
+        // No shadows: only the [0.3, 1.05] clamp applies.
+        assert_eq!(
+            LightDef::DEFAULT.effective_day_color(),
+            [1.0, 1.0, 1.0]
+        );
+
+        // 1 * 0.5 * 2 = 1.0, 1 * 1.0 * 2 = 2.0 -> 1.05, 1 * 0.1 * 2 = 0.2 -> 0.3.
+        let lit = LightDef {
+            has_shadows: true,
+            ambiance_light: [1.0, 1.0, 1.0],
+            shadows: [0.5, 1.0, 0.1],
+            ..LightDef::DEFAULT
+        };
+        assert_eq!(lit.effective_day_color(), [1.0, 1.05, 0.3]);
+
+        // The shadow product is clamped to [0, 2] before the final clamp.
+        let bright = LightDef {
+            has_shadows: true,
+            ambiance_light: [2.0, 0.0, 1.0],
+            shadows: [1.0, 1.0, 1.0],
+            ..LightDef::DEFAULT
+        };
+        assert_eq!(bright.effective_day_color(), [1.05, 0.3, 1.05]);
+    }
+
+    #[test]
     fn get_color_falls_back_to_default() {
         let map = LightMap::default();
         let default_color = map.get_color(10, 20, 0);

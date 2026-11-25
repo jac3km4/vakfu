@@ -254,3 +254,57 @@ fn smooth_zoom(current: f32, target: f32, factor: f32) -> f32 {
         next
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smooth_position_lerps_clamps_and_snaps() {
+        let target = Vec3::new(10.0, 0.0, 0.0);
+        assert_eq!(
+            smooth_position(Vec3::ZERO, target, 0.5),
+            Vec3::new(5.0, 0.0, 0.0)
+        );
+        // Factors are clamped to [0, 1].
+        assert_eq!(smooth_position(Vec3::ZERO, target, 2.0), target);
+        assert_eq!(smooth_position(Vec3::ZERO, target, -1.0), Vec3::ZERO);
+        // Within 0.01 of the target the value snaps exactly.
+        assert_eq!(smooth_position(Vec3::new(9.995, 0.0, 0.0), target, 0.1), target);
+    }
+
+    #[test]
+    fn smooth_zoom_lerps_clamps_and_snaps() {
+        assert_eq!(smooth_zoom(1.0, 3.0, 0.5), 2.0);
+        assert_eq!(smooth_zoom(1.0, 3.0, 2.0), 3.0);
+        assert_eq!(smooth_zoom(1.0, 3.0, -1.0), 1.0);
+        // Within 0.0001 of the target the value snaps exactly.
+        assert_eq!(smooth_zoom(2.999_95, 3.0, 0.5), 3.0);
+    }
+
+    #[test]
+    fn is_pointer_over_ui_checks_canvas_rect() {
+        let mut ctx = egui::Context::default();
+        let canvas = Some(Rect::from_corners(
+            Vec2::ZERO,
+            Vec2::new(100.0, 100.0),
+        ));
+
+        assert!(!is_pointer_over_ui(
+            &mut ctx,
+            canvas,
+            Some(Vec2::new(50.0, 50.0))
+        ));
+        assert!(is_pointer_over_ui(
+            &mut ctx,
+            canvas,
+            Some(Vec2::new(150.0, 50.0))
+        ));
+        // Without a canvas rect only egui's own pointer state matters.
+        assert!(!is_pointer_over_ui(
+            &mut ctx,
+            None,
+            Some(Vec2::new(150.0, 50.0))
+        ));
+    }
+}

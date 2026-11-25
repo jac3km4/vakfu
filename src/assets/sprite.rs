@@ -358,6 +358,143 @@ impl<'a, C: Endianess> TryRead<'a, C> for MapSpriteLibrary {
 mod tests {
     use super::*;
 
+    fn push_u16(buf: &mut Vec<u8>, value: u16) {
+        buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_i16(buf: &mut Vec<u8>, value: i16) {
+        buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_i32(buf: &mut Vec<u8>, value: i32) {
+        buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Serialises a non-animated definition with fixed, recognisable fields.
+    fn static_definition(id: i32, flags: u8) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        push_i32(&mut bytes, id);
+        push_i16(&mut bytes, -5); // origin_x
+        push_i16(&mut bytes, 7); // origin_y
+        push_u16(&mut bytes, 64); // texture_width
+        push_u16(&mut bytes, 48); // texture_height
+        push_u16(&mut bytes, 60); // render_width
+        push_u16(&mut bytes, 40); // render_height
+        push_i32(&mut bytes, 900); // texture_id
+        bytes.push(flags);
+        bytes.push(12); // visual_height
+        bytes.push(0x07); // visibility_mask
+        bytes.push(0x01); // export_mask
+        bytes.push(0); // shader
+        bytes.push(0); // frame_count (static)
+        bytes.push(4); // ground_sound
+        bytes
+    }
+
+    #[test]
+    fn sprite_flags_decode_bits() {
+        // slope = 3 (low nibble), flip, before_mobile, walkable.
+        let flags = SpriteFlags::from_bits(0b1101_0011);
+        assert_eq!(flags.slope(), 3);
+        assert!(flags.is_flip());
+        assert!(!flags.is_move_top());
+        assert!(flags.is_before_mobile());
+        assert!(flags.is_walkable());
+
+        let none = SpriteFlags::from_bits(0);
+        assert_eq!(none.slope(), 0);
+        assert!(!none.is_flip());
+        assert!(!none.is_before_mobile());
+        assert!(!none.is_walkable());
+    }
+
+    #[test]
+    fn sprite_definition_parses_static_fields() {
+        let bytes = static_definition(42, 0b1101_0011);
+        let (definition, consumed) =
+            MapSpriteDefinition::try_read(&bytes, LittleEndian).unwrap();
+        assert_eq!(consumed, bytes.len());
+
+        assert_eq!(definition.id(), 42);
+        assert_eq!(definition.origin(), (-5, 7));
+        assert_eq!(definition.texture_size(), (64, 48));
+        assert_eq!(definition.size(), (60, 40));
+        assert_eq!(definition.texture_id(), 900);
+        assert_eq!(definition.export_mask(), 0x01);
+        assert!(matches!(definition.animation(), Animation::None));
+
+        let flags = definition.flags();
+        assert_eq!(flags.slope(), 3);
+        assert!(flags.is_flip());
+        assert!(!flags.is_move_top());
+        assert!(flags.is_before_mobile());
+        assert!(flags.is_walkable());
+    }
+
+    #[test]
+    fn frames_parse_durations_coordinates_and_time_offsets() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&300u32.to_le_bytes()); // total_time
+        push_u16(&mut bytes, 32); // width
+        push_u16(&mut bytes, 24); // height
+        push_u16(&mut bytes, 64); // full_width
+        push_u16(&mut bytes, 48); // full_height
+        push_u16(&mut bytes, 100); // frame 0 duration
+        push_u16(&mut bytes, 200); // frame 1 duration
+        push_u16(&mut bytes, 0); // frame 0 x
+        push_u16(&mut bytes, 0); // frame 0 y
+        push_u16(&mut bytes, 32); // frame 1 x
+        push_u16(&mut bytes, 0); // frame 1 y
+
+        let (frames, consumed) = Frames::try_read(&bytes, (LittleEndian, 2u8)).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(frames.total_time(), 300);
+        assert_eq!((frames.width(), frames.height()), (32, 24));
+        assert_eq!((frames.full_width(), frames.full_height()), (64, 48));
+
+        let starts: Vec<u32> = frames.iter().map(|frame| frame.time).collect();
+        assert_eq!(starts, vec![0, 100]);
+        let coords: Vec<[u16; 2]> = frames
+            .iter()
+            .map(|frame| [frame.x, frame.y])
+            .collect();
+        assert_eq!(coords, vec![[0, 0], [32, 0]]);
+        assert_eq!(frames.frame_coords(1), Some([32, 0]));
+        assert_eq!(frames.frame_coords(2), None);
+
+        // Cumulative end times: frame 0 ends at 100, frame 1 at 300.
+        assert_eq!(frames.frame_index_at(0), 0);
+        assert_eq!(frames.frame_index_at(99), 0);
+        assert_eq!(frames.frame_index_at(100), 1);
+        assert_eq!(frames.frame_index_at(299), 1);
+    }
+
+    #[test]
+    fn sprite_library_reads_empty_and_populated_input() {
+        let empty_bytes = 0u32.to_le_bytes();
+        let (empty, consumed) =
+            MapSpriteLibrary::try_read(&empty_bytes, LittleEndian).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+        assert_eq!(consumed, empty_bytes.len());
+
+        let mut bytes = 1u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&static_definition(42, 0));
+        let (library, consumed) = MapSpriteLibrary::try_read(&bytes, LittleEndian).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(library.len(), 1);
+        assert_eq!(library.get(42).unwrap().texture_id(), 900);
+        assert!(library.get(7).is_none());
+    }
+
+    #[test]
+    fn sprite_library_rejects_truncated_definitions() {
+        // The count promises one definition but the payload is cut short.
+        let mut bytes = 1u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&static_definition(42, 0)[..10]);
+        assert!(MapSpriteLibrary::try_read(&bytes, LittleEndian).is_err());
+    }
+
     #[test]
     fn frame_lookup_honours_boundaries() {
         let frames = Frames::new_for_test(300, vec![100, 100, 100]);

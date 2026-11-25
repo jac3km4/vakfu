@@ -535,6 +535,130 @@ mod tests {
         assert_eq!(rgb(-128), [0.0, 0.0, 0.0]);
     }
 
+    fn test_sprite(definition_id: i32) -> MapSprite {
+        MapSprite {
+            cell_z: 0,
+            height: 0,
+            altitude_order: 0,
+            tag: 0,
+            definition_id,
+            group_index: 0,
+            color_index: 0,
+        }
+    }
+
+    fn test_chunk(sub_chunks: Vec<MapSubChunk>) -> MapChunk {
+        MapChunk {
+            min_x: 0,
+            min_y: 0,
+            min_z: 0,
+            max_x: 10,
+            max_y: 10,
+            max_z: 0,
+            groups: Vec::new(),
+            colors: vec![Color::None],
+            map_x: 100,
+            map_y: 200,
+            sub_chunks,
+        }
+    }
+
+    #[test]
+    fn elements_map_subchunk_cells_to_global_coordinates() {
+        // A 2x2 sub-chunk offset by (1, 2) inside a chunk at (100, 200).
+        // Cells are stored row-major: x advances every `max_y - min_y` cells.
+        let sub = MapSubChunk {
+            min_x: 1,
+            max_x: 3,
+            min_y: 2,
+            max_y: 4,
+            cells: vec![
+                MapCell {
+                    elements: vec![test_sprite(10)],
+                },
+                MapCell {
+                    elements: vec![test_sprite(11)],
+                },
+                MapCell {
+                    elements: vec![test_sprite(12)],
+                },
+                MapCell {
+                    elements: vec![test_sprite(13)],
+                },
+            ],
+        };
+        let chunk = test_chunk(vec![sub]);
+
+        let elements: Vec<(i32, i32, i32)> = chunk
+            .elements()
+            .map(|element| {
+                (
+                    element.definition_id(),
+                    element.cell_x(),
+                    element.cell_y(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            elements,
+            vec![
+                (10, 101, 202),
+                (11, 101, 203),
+                (12, 102, 202),
+                (13, 102, 203),
+            ]
+        );
+    }
+
+    #[test]
+    fn elements_skip_degenerate_subchunks() {
+        // `row_size == 0` would divide by zero; such sub-chunks are ignored.
+        let sub = MapSubChunk {
+            min_x: 0,
+            max_x: 1,
+            min_y: 5,
+            max_y: 5,
+            cells: vec![MapCell {
+                elements: vec![test_sprite(1)],
+            }],
+        };
+        let chunk = test_chunk(vec![sub]);
+        assert_eq!(chunk.elements().count(), 0);
+    }
+
+    #[test]
+    fn subchunk_bounds_accept_unsigned_values_above_127() {
+        // Bounds are read as unsigned bytes (`readByte() & 0xFF`).
+        // min_x=128, max_x=200 (width 72), min_y=0, max_y=1 (height 1).
+        let mut bytes = vec![128u8, 200, 0, 1];
+        bytes.extend_from_slice(&[0u8; 72]);
+
+        let (sub, consumed) = MapSubChunk::try_read(&bytes, LittleEndian).unwrap();
+        assert_eq!(
+            (sub.min_x, sub.max_x, sub.min_y, sub.max_y),
+            (128, 200, 0, 1)
+        );
+        assert_eq!(sub.cells.len(), 72);
+        assert_eq!(consumed, bytes.len());
+    }
+
+    #[test]
+    fn subchunk_rejects_inverted_bounds() {
+        // max_x < min_x would underflow the cell count.
+        let bytes = [5u8, 3, 0, 1];
+        assert!(matches!(
+            MapSubChunk::try_read(&bytes, LittleEndian),
+            Err(byte::Error::BadInput { .. })
+        ));
+
+        // max_y < min_y is rejected the same way.
+        let bytes = [0u8, 1, 9, 2];
+        assert!(matches!(
+            MapSubChunk::try_read(&bytes, LittleEndian),
+            Err(byte::Error::BadInput { .. })
+        ));
+    }
+
     #[test]
     fn test_color_to_f32_array_defaults() {
         // No tint decodes to identity; RGB defaults to 0.5 (x2 = 1.0) and

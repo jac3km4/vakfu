@@ -1269,6 +1269,67 @@ mod tests {
     }
 
     #[test]
+    fn atlas_layout_static_sprite_uses_padded_canvas() {
+        let layout = atlas_layout_parts(UVec2::new(30, 20), &Animation::None);
+        // The loaded TGAM is padded to a power of two, so the atlas must match.
+        assert_eq!(layout.size, UVec2::new(32, 32));
+        assert_eq!(
+            layout.textures,
+            vec![URect {
+                min: UVec2::ZERO,
+                max: UVec2::new(30, 20),
+            }]
+        );
+    }
+
+    #[test]
+    fn atlas_layout_animated_sprite_uses_padded_sheet_and_frame_rects() {
+        use byte::TryRead;
+        use byte::ctx::LittleEndian;
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&300u32.to_le_bytes()); // total_time
+        // width, height, full_width, full_height, 2 durations, 2 coordinates.
+        for value in [20u16, 12, 40, 24, 100, 200, 0, 0, 20, 12] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        let (frames, _) = Frames::try_read(&bytes, (LittleEndian, 2u8)).unwrap();
+
+        let layout = atlas_layout_parts(
+            UVec2::new(20, 12),
+            &Animation::Frames(Arc::new(frames)),
+        );
+        assert_eq!(layout.size, UVec2::new(64, 32));
+        assert_eq!(
+            layout.textures,
+            vec![
+                URect {
+                    min: UVec2::ZERO,
+                    max: UVec2::new(20, 12),
+                },
+                URect {
+                    min: UVec2::new(20, 12),
+                    max: UVec2::new(40, 24),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn before_mobile_elements_sort_above_ground_layers() {
+        let ground = element_hashcode(3, 4, sorted_altitude_order(0, false));
+        let before_mobile = element_hashcode(3, 4, sorted_altitude_order(0, true));
+        assert!(before_mobile > ground);
+        // `is_before_mobile` shifts by `LAYER_COUNT - 1` (12) layers.
+        assert_eq!(
+            sorted_altitude_order(0, true) - sorted_altitude_order(0, false),
+            12
+        );
+        // Higher altitude orders still sort above lower ones in the same cell.
+        assert!(element_hashcode(3, 4, 5) > element_hashcode(3, 4, 4));
+    }
+
+    #[test]
     fn test_frame_index_calculations() {
         let frames = Frames::new_for_test(300, vec![100, 100, 100]);
         assert_eq!(frame_index(&frames, Duration::from_millis(0)), 0);
