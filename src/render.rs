@@ -959,6 +959,12 @@ pub fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
 /// dimensions of the loaded TGAM image, otherwise the UVs are normalised
 /// against the wrong size: for static sprites that is `pow2(sample_size)`, and
 /// for animated sprites the full sprite sheet `pow2(full_width x full_height)`.
+///
+/// The reference engine insets its UVs by half a texel and subtracts half a
+/// texel from the padded height (`AnimData.computeTextureCoords`). That is a
+/// fixed-pipeline `GL_NEAREST` pixel-centre adjustment; Bevy's atlas uses
+/// exact texel-edge rectangles, which sample the same texels without the
+/// legacy offset.
 pub fn atlas_layout_parts(sample_size: UVec2, animation: &Animation) -> TextureAtlasLayout {
     let canvas = match animation {
         Animation::None => padded(sample_size),
