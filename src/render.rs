@@ -19,6 +19,32 @@ use crate::assets::{
 use crate::camera::CameraController;
 use crate::settings::MapViewSettings;
 
+/// Elements are drawn by their world-space Z. Every map element stays inside
+/// this range so editor overlays and the camera's far plane never collide with
+/// world geometry.
+pub const Z_MIN: f32 = 0.0;
+pub const Z_MAX: f32 = 500.0;
+
+/// Free space kept at either end of the range when Z values are re-spread, so
+/// repeated small edits do not force another re-normalization.
+const Z_MARGIN: f32 = 25.0;
+/// Gap used when appending past the current top or bottom neighbour.
+const Z_STEP: f32 = 0.01;
+const Z_MIDPOINT: f32 = (Z_MIN + Z_MAX) * 0.5;
+
+/// One element's current Z, uid and horizontal envelope, used when re-spreading.
+type ZSortEntry = (f32, u64, AABB<(f32, f32)>);
+
+/// Evenly spreads `count` ordered elements over the world Z range.
+fn spread_z(index: usize, count: usize) -> f32 {
+    if count <= 1 {
+        return Z_MIDPOINT;
+    }
+    let min = Z_MIN + Z_MARGIN;
+    let max = Z_MAX - Z_MARGIN;
+    min + (index as f32 / (count - 1) as f32) * (max - min)
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct ChangeMapEvent(pub i32);
 
@@ -106,7 +132,7 @@ impl MapRenderer {
         let mut uid_envelopes = HashMap::with_capacity(elements.len());
         let mut next_uid = 1u64;
 
-        let total_elements = elements.len().max(1) as f32;
+        let total_elements = elements.len();
         let renderables: Vec<_> = elements
             .iter()
             .enumerate()
@@ -130,7 +156,7 @@ impl MapRenderer {
                 let (origin_x, origin_y) = def.origin();
                 let x = x - origin_x as f32;
                 let y = y + origin_y as f32;
-                let z = (z_index as f32 / total_elements) * 500.0;
+                let z = spread_z(z_index, total_elements);
 
                 // Preserve the asset format's established mapping: size() is
                 // the sampled rectangle, texture_size() is the world-space size.
@@ -243,7 +269,32 @@ impl MapRenderer {
         uid
     }
 
-    pub fn compute_z_for(&self, envelope: AABB<(f32, f32)>, hashcode: i64, ignore_uid: Option<u64>) -> f32 {
+    /// Returns a Z that places an element with `hashcode` in the correct order
+    /// relative to the elements its envelope overlaps.
+    ///
+    /// When repeated edits have exhausted the gap between two neighbours (or
+    /// pushed the range against [`Z_MIN`] / [`Z_MAX`]), the map's Z values are
+    /// re-spread order-preservingly before retrying.
+    pub fn place_z(
+        &mut self,
+        envelope: AABB<(f32, f32)>,
+        hashcode: i64,
+        ignore_uid: Option<u64>,
+    ) -> f32 {
+        if let Some(z) = self.try_place_z(envelope, hashcode, ignore_uid) {
+            return z;
+        }
+        self.normalize_z();
+        self.try_place_z(envelope, hashcode, ignore_uid)
+            .unwrap_or(Z_MIDPOINT)
+    }
+
+    fn try_place_z(
+        &self,
+        envelope: AABB<(f32, f32)>,
+        hashcode: i64,
+        ignore_uid: Option<u64>,
+    ) -> Option<f32> {
         let mut max_below: Option<f32> = None;
         let mut min_above: Option<f32> = None;
         for other in self.rtree.locate_in_envelope_intersecting(envelope) {
@@ -257,20 +308,38 @@ impl MapRenderer {
             }
         }
         match (max_below, min_above) {
-            (Some(b), Some(a)) if b + 1e-4 < a => (b + a) * 0.5,
-            (Some(b), _) => b + 0.01,
-            (None, Some(a)) => a - 0.01,
-            (None, None) => 250.0,
+            (Some(b), Some(a)) => {
+                let mid = b + (a - b) * 0.5;
+                (mid > b && mid < a).then_some(mid)
+            }
+            (Some(b), None) => (b + Z_STEP <= Z_MAX).then_some(b + Z_STEP),
+            (None, Some(a)) => (a - Z_STEP >= Z_MIN).then_some(a - Z_STEP),
+            (None, None) => Some(Z_MIDPOINT),
         }
     }
 
-    /// Computes a Z strictly in front of `min_z`, tucked cleanly below any element already above `min_z`.
-    pub fn compute_z_above(
-        &self,
+    /// Returns a Z strictly in front of `min_z`, tucked cleanly below any
+    /// element already above `min_z`.
+    pub fn place_above(
+        &mut self,
         min_z: f32,
         envelope: AABB<(f32, f32)>,
         ignore_uid: Option<u64>,
     ) -> f32 {
+        if let Some(z) = self.try_place_above(min_z, envelope, ignore_uid) {
+            return z;
+        }
+        self.normalize_z();
+        self.try_place_above(min_z, envelope, ignore_uid)
+            .unwrap_or(min_z + Z_STEP)
+    }
+
+    fn try_place_above(
+        &self,
+        min_z: f32,
+        envelope: AABB<(f32, f32)>,
+        ignore_uid: Option<u64>,
+    ) -> Option<f32> {
         let mut next_above: Option<f32> = None;
         for other in self.rtree.locate_in_envelope_intersecting(envelope) {
             if Some(other.uid) == ignore_uid {
@@ -281,27 +350,74 @@ impl MapRenderer {
             }
         }
         match next_above {
-            Some(a) if min_z + 1e-4 < a => (min_z + a) * 0.5,
-            _ => min_z + 0.01,
+            Some(a) => {
+                let mid = min_z + (a - min_z) * 0.5;
+                (mid > min_z && mid < a).then_some(mid)
+            }
+            None => (min_z + Z_STEP <= Z_MAX).then_some(min_z + Z_STEP),
         }
     }
 
-    pub fn frontmost_z_for(&self, envelope: AABB<(f32, f32)>, ignore_uid: Option<u64>) -> f32 {
-        self.rtree
-            .locate_in_envelope_intersecting(envelope)
-            .filter(|other| Some(other.uid) != ignore_uid)
-            .map(|other| other.position.z)
-            .reduce(f32::max)
-            .map_or(250.0, |z| z + 0.01)
+    pub fn frontmost_z_for(&mut self, envelope: AABB<(f32, f32)>, ignore_uid: Option<u64>) -> f32 {
+        let z = self
+            .extreme_z(envelope, ignore_uid, f32::max)
+            .map_or(Z_MIDPOINT, |z| z + Z_STEP);
+        if z <= Z_MAX {
+            return z;
+        }
+        self.normalize_z();
+        self.extreme_z(envelope, ignore_uid, f32::max)
+            .map_or(Z_MIDPOINT, |z| z + Z_STEP)
     }
 
-    pub fn backmost_z_for(&self, envelope: AABB<(f32, f32)>, ignore_uid: Option<u64>) -> f32 {
+    pub fn backmost_z_for(&mut self, envelope: AABB<(f32, f32)>, ignore_uid: Option<u64>) -> f32 {
+        let z = self
+            .extreme_z(envelope, ignore_uid, f32::min)
+            .map_or(Z_MIN, |z| z - Z_STEP);
+        if z >= Z_MIN {
+            return z;
+        }
+        self.normalize_z();
+        self.extreme_z(envelope, ignore_uid, f32::min)
+            .map_or(Z_MIN, |z| z - Z_STEP)
+    }
+
+    fn extreme_z(
+        &self,
+        envelope: AABB<(f32, f32)>,
+        ignore_uid: Option<u64>,
+        op: fn(f32, f32) -> f32,
+    ) -> Option<f32> {
         self.rtree
             .locate_in_envelope_intersecting(envelope)
             .filter(|other| Some(other.uid) != ignore_uid)
             .map(|other| other.position.z)
-            .reduce(f32::min)
-            .map_or(0.0, |z| z - 0.01)
+            .reduce(op)
+    }
+
+    /// Re-spreads every element's Z across the world range while preserving
+    /// their current order.
+    ///
+    /// Z is not part of the R\* tree envelope, so elements can be updated in
+    /// place without rebuilding the index.
+    fn normalize_z(&mut self) {
+        let mut order: Vec<ZSortEntry> = self
+            .rtree
+            .iter()
+            .map(|elem| (elem.position.z, elem.uid, elem.envelope()))
+            .collect();
+        order.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        let count = order.len();
+        for (index, (_, uid, envelope)) in order.into_iter().enumerate() {
+            let z = spread_z(index, count);
+            if let Some(elem) = self
+                .rtree
+                .locate_in_envelope_intersecting_mut(envelope)
+                .find(|elem| elem.uid == uid)
+            {
+                elem.position.z = z;
+            }
+        }
     }
 
     pub fn default_ground_z(&self) -> i16 {
@@ -376,7 +492,7 @@ impl MapRenderer {
             (x, y),
             (x + f32::from(display_width), y - f32::from(display_height)),
         );
-        let z = self.compute_z_for(envelope, hashcode, None);
+        let z = self.place_z(envelope, hashcode, None);
 
         Renderable {
             uid,
@@ -561,7 +677,7 @@ impl PartialEq for Renderable {
 
 impl Renderable {
     /// Recomputes world-space `position` and `hashcode` from `cell_x`, `cell_y`, `cell_z`, `height`, `altitude_order`.
-    pub fn recompute_position(&mut self, renderer: &MapRenderer) {
+    pub fn recompute_position(&mut self, renderer: &mut MapRenderer) {
         let (sx, sy) = iso_to_screen(
             self.cell_x,
             self.cell_y,
@@ -574,7 +690,7 @@ impl Renderable {
             self.cell_y,
             sorted_altitude_order(self.altitude_order, self.before_mobile),
         );
-        self.position.z = renderer.compute_z_for(self.envelope(), self.hashcode, Some(self.uid));
+        self.position.z = renderer.place_z(self.envelope(), self.hashcode, Some(self.uid));
     }
 }
 
@@ -1039,6 +1155,51 @@ mod tests {
 
     use super::*;
 
+    fn test_renderable(uid: u64, z: f32, hashcode: i64) -> Renderable {
+        Renderable {
+            uid,
+            definition_id: 1,
+            position: Vec3::new(0.0, 0.0, z),
+            origin: (0, 0),
+            cell_x: 0,
+            cell_y: 0,
+            cell_z: 0,
+            height: 0,
+            altitude_order: 0,
+            before_mobile: false,
+            hashcode,
+            texture_size: UVec2::splat(10),
+            render_size: UVec2::splat(10),
+            color: LinearRgba::WHITE,
+            color_tinted: LinearRgba::WHITE,
+            texture_id: 1,
+            flip_x: false,
+            animation: Animation::None,
+            group: 0,
+            layer: 0,
+            id: None,
+        }
+    }
+
+    fn test_renderer(elements: Vec<Renderable>) -> MapRenderer {
+        MapRenderer {
+            next_uid: elements.iter().map(|elem| elem.uid + 1).max().unwrap_or(1),
+            uid_envelopes: elements
+                .iter()
+                .map(|elem| (elem.uid, elem.envelope()))
+                .collect(),
+            rtree: RTree::bulk_load(elements),
+            visible: HashSet::new(),
+            spare_visible: HashSet::new(),
+            pending_despawns: Vec::new(),
+            sprite_assets: HashMap::new(),
+            center: Vec2::ZERO,
+            used_definitions: Vec::new(),
+            available_layers: Vec::new(),
+            cell_altitudes: HashMap::new(),
+        }
+    }
+
     fn pending_task(pool: &bevy::tasks::TaskPool) -> Task<anyhow::Result<MapRenderer>> {
         pool.spawn(future::pending())
     }
@@ -1287,76 +1448,96 @@ mod tests {
     #[test]
     fn test_compute_z_above_places_cleanly_on_top() {
         let envelope = AABB::from_corners((0.0, 0.0), (50.0, 50.0));
-        let elem1 = Renderable {
-            uid: 1,
-            definition_id: 1,
-            position: Vec3::new(0.0, 0.0, 10.0),
-            origin: (0, 0),
-            cell_x: 0,
-            cell_y: 0,
-            cell_z: 0,
-            height: 0,
-            altitude_order: 0,
-            before_mobile: false,
-            hashcode: 0,
-            texture_size: UVec2::splat(10),
-            render_size: UVec2::splat(10),
-            color: LinearRgba::WHITE,
-            color_tinted: LinearRgba::WHITE,
-            texture_id: 1,
-            flip_x: false,
-            animation: Animation::None,
-            group: 0,
-            layer: 0,
-            id: None,
-        };
-        let elem2 = Renderable {
-            uid: 2,
-            definition_id: 1,
-            position: Vec3::new(0.0, 0.0, 20.0),
-            origin: (0, 0),
-            cell_x: 0,
-            cell_y: 0,
-            cell_z: 0,
-            height: 0,
-            altitude_order: 1,
-            before_mobile: false,
-            hashcode: 1,
-            texture_size: UVec2::splat(10),
-            render_size: UVec2::splat(10),
-            color: LinearRgba::WHITE,
-            color_tinted: LinearRgba::WHITE,
-            texture_id: 1,
-            flip_x: false,
-            animation: Animation::None,
-            group: 0,
-            layer: 0,
-            id: None,
-        };
+        let elem1 = test_renderable(1, 10.0, 0);
+        let mut elem2 = test_renderable(2, 20.0, 1);
+        elem2.altitude_order = 1;
 
-        let renderer = MapRenderer {
-            rtree: RTree::bulk_load(vec![elem1, elem2]),
-            uid_envelopes: HashMap::new(),
-            next_uid: 3,
-            visible: HashSet::new(),
-            spare_visible: HashSet::new(),
-            pending_despawns: Vec::new(),
-            sprite_assets: HashMap::new(),
-            center: Vec2::ZERO,
-            used_definitions: Vec::new(),
-            available_layers: Vec::new(),
-            cell_altitudes: HashMap::new(),
-        };
+        let mut renderer = test_renderer(vec![elem1, elem2]);
 
         // Placing above z=10.0 should land between 10.0 and 20.0 (15.0)
-        let z_between = renderer.compute_z_above(10.0, envelope, None);
+        let z_between = renderer.place_above(10.0, envelope, None);
         assert!(z_between > 10.0 && z_between < 20.0);
 
         // Placing above z=20.0 (highest) should land above 20.0
-        let z_top = renderer.compute_z_above(20.0, envelope, None);
+        let z_top = renderer.place_above(20.0, envelope, None);
         assert!(z_top > 20.0);
 
         // frontmost_z_for should be strictly greater than max existing (20.0)
         assert!(renderer.frontmost_z_for(envelope, None) > 20.0);
+    }
+
+    #[test]
+    fn normalize_z_preserves_visual_order_and_respects_bounds() {
+        let mut renderer = test_renderer(vec![
+            test_renderable(1, 7.5, 10),
+            test_renderable(2, 3.0, 20),
+            test_renderable(3, 7.6, 30),
+        ]);
+
+        renderer.normalize_z();
+
+        let z1 = renderer.get_element(1).unwrap().position.z;
+        let z2 = renderer.get_element(2).unwrap().position.z;
+        let z3 = renderer.get_element(3).unwrap().position.z;
+
+        assert!(z2 < z1, "uid 2 started below uid 1");
+        assert!(z1 < z3, "uid 3 started above uid 1");
+        assert!((Z_MIN + Z_MARGIN - z2).abs() < 1e-3);
+        assert!((Z_MAX - Z_MARGIN - z3).abs() < 1e-3);
+    }
+
+    #[test]
+    fn collapsed_z_gap_renormalizes_instead_of_inverting_order() {
+        let mut renderer = test_renderer(vec![
+            test_renderable(1, 250.0, 10),
+            test_renderable(2, 250.0, 20),
+        ]);
+        let envelope = AABB::from_point((0.0, 0.0));
+
+        let placed = renderer.place_z(envelope, 15, None);
+        let below = renderer.get_element(1).unwrap().position.z;
+        let above = renderer.get_element(2).unwrap().position.z;
+
+        assert!(below < placed, "placed below the lower neighbour");
+        assert!(placed < above, "placed above the upper neighbour");
+        assert!((Z_MIN..=Z_MAX).contains(&placed));
+    }
+
+    #[test]
+    fn bring_front_and_send_back_stay_inside_the_world_z_range() {
+        let envelope = AABB::from_point((0.0, 0.0));
+        let mut renderer = test_renderer(vec![test_renderable(0, 250.0, 0)]);
+        let mut next_uid = 1;
+
+        for _ in 0..600 {
+            let z = renderer.frontmost_z_for(envelope, None);
+            let max = renderer
+                .rtree
+                .iter()
+                .map(|elem| elem.position.z)
+                .reduce(f32::max)
+                .unwrap();
+            assert!(
+                z > max,
+                "frontmost {z} is not above the current top {max}"
+            );
+            assert!((Z_MIN..=Z_MAX).contains(&z));
+            renderer.insert_element(test_renderable(next_uid, z, next_uid as i64));
+            next_uid += 1;
+        }
+
+        for _ in 0..600 {
+            let z = renderer.backmost_z_for(envelope, None);
+            let min = renderer
+                .rtree
+                .iter()
+                .map(|elem| elem.position.z)
+                .reduce(f32::min)
+                .unwrap();
+            assert!(z < min, "backmost {z} is not below the current bottom {min}");
+            assert!((Z_MIN..=Z_MAX).contains(&z));
+            renderer.insert_element(test_renderable(next_uid, z, next_uid as i64));
+            next_uid += 1;
+        }
     }
 }

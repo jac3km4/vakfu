@@ -790,7 +790,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                     editor.inspector_before = Some(elem.clone());
                 }
                 if changed {
-                    edited.recompute_position(&renderer);
+                    edited.recompute_position(&mut renderer);
                     renderer.update_element(edited.clone());
                     // Edits that never opened a drag/focus session (such as a
                     // colour popup) are recorded immediately; a tracked session
@@ -1035,7 +1035,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                 {
                     let mut after = before.clone();
                     after.cell_z = after.cell_z.saturating_add(z_delta);
-                    after.recompute_position(&renderer);
+                    after.recompute_position(&mut renderer);
                     renderer.update_element(after.clone());
                     editor.history.push(EditAction::Replace { before, after });
                 } else {
@@ -1182,7 +1182,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
             {
                 current.cell_x = target_x;
                 current.cell_y = target_y;
-                current.recompute_position(&renderer);
+                current.recompute_position(&mut renderer);
                 renderer.update_element(current);
             }
         } else if editor.painting_active
@@ -1272,7 +1272,7 @@ impl PlacementContext<'_> {
         {
             elem.position.z = self
                 .renderer
-                .compute_z_above(min_front_z, elem.envelope(), None);
+                .place_above(min_front_z, elem.envelope(), None);
         }
         self.editor.selected_uid = Some(elem.uid);
         self.renderer.insert_element(elem.clone());
@@ -1652,7 +1652,7 @@ mod tests {
         // Edit element coordinates and verify the attached Entity is preserved (not despawned)
         let mut moved = with_entity.clone();
         moved.cell_x = 5;
-        moved.recompute_position(&renderer);
+        moved.recompute_position(&mut renderer);
         renderer.update_element(moved.clone());
         history.push(EditAction::Replace {
             before: initial,
