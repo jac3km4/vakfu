@@ -14,9 +14,9 @@ use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
-    Animation, Frames, LightDef, LightMap, LightingState, Map, MapChunk, MapSpriteDefinition,
-    MapSpriteLibrary, TINT_SCALE, element_hashcode, iso_to_screen, round_up_to_power_of_two,
-    sorted_altitude_order,
+    Animation, Frames, GroupVisibility, LightDef, LightMap, LightingState, Map, MapChunk,
+    MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, element_hashcode, iso_to_screen,
+    round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
 };
 use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
@@ -69,6 +69,13 @@ pub struct MapCatalog {
     pub available_maps: Vec<i32>,
     pub current_map_id: i32,
 }
+
+/// Optional indoor/outdoor group visibility metadata.
+///
+/// When absent (the map jar has no `groups.lib`), every group is rendered as
+/// before.
+#[derive(Resource, Default)]
+pub struct GroupVisibilityState(pub Option<GroupVisibility>);
 
 #[derive(Resource, Default)]
 pub struct PendingMapLoad {
@@ -808,15 +815,29 @@ pub fn load_renderer(
     Ok(MapRenderer::new(&map, sprites, light_map))
 }
 
-pub fn load_map_system(
-    mut commands: Commands<'_, '_>,
-    mut events: MessageReader<'_, '_, ChangeMapEvent>,
-    mut catalog: ResMut<'_, MapCatalog>,
-    mut render_state: ResMut<'_, MapRenderer>,
-    mut camera_controller: ResMut<'_, CameraController>,
-    mut cameras: Query<'_, '_, &mut Transform, With<MainCamera>>,
-    mut pending_load: ResMut<'_, PendingMapLoad>,
-) {
+#[derive(SystemParam)]
+pub struct LoadMapParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    events: MessageReader<'w, 's, ChangeMapEvent>,
+    catalog: ResMut<'w, MapCatalog>,
+    render_state: ResMut<'w, MapRenderer>,
+    camera_controller: ResMut<'w, CameraController>,
+    cameras: Query<'w, 's, &'static mut Transform, With<MainCamera>>,
+    pending_load: ResMut<'w, PendingMapLoad>,
+    groups: ResMut<'w, GroupVisibilityState>,
+}
+
+pub fn load_map_system(params: LoadMapParams<'_, '_>) {
+    let LoadMapParams {
+        mut commands,
+        mut events,
+        mut catalog,
+        mut render_state,
+        mut camera_controller,
+        mut cameras,
+        mut pending_load,
+        mut groups,
+    } = params;
     if let Some(&ChangeMapEvent(target_map_id)) = events.read().last()
         && pending_load.request(catalog.current_map_id, target_map_id)
     {
@@ -844,6 +865,13 @@ pub fn load_map_system(
                 }
                 *render_state = new_renderer;
                 catalog.current_map_id = map_id;
+                match GroupVisibility::load_from_map(&catalog.maps_path, map_id) {
+                    Ok(visibility) => groups.0 = Some(visibility),
+                    Err(err) => {
+                        warn!("could not load group visibility: {err}");
+                        groups.0 = None;
+                    }
+                }
                 info!("Switched to map {map_id}");
             }
             Err(err) => {
@@ -872,6 +900,7 @@ pub struct RenderParams<'w, 's> {
     atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     render_state: ResMut<'w, MapRenderer>,
     settings: Res<'w, MapViewSettings>,
+    groups: Res<'w, GroupVisibilityState>,
     sprites: MapSpriteQuery<'w, 's>,
 }
 
@@ -883,6 +912,7 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
         mut atlas_layouts,
         mut render_state,
         settings,
+        groups,
         mut sprites,
     } = params;
     if !render_state.pending_despawns.is_empty() {
@@ -918,6 +948,18 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     } = &mut *render_state;
     seen.clear();
 
+    // The reference keys group visibility on the group under the camera (the
+    // player's walkable cell). Use the topmost element at the camera centre.
+    let group_from = groups.0.as_ref().map(|_| {
+        let (cell_x, cell_y) = screen_to_iso(transform.translation.x, transform.translation.y, 0);
+        let point = AABB::from_point((transform.translation.x, transform.translation.y));
+        rtree
+            .locate_in_envelope_intersecting(point)
+            .filter(|elem| elem.cell_x == cell_x && elem.cell_y == cell_y)
+            .max_by(|a, b| a.position.z.total_cmp(&b.position.z))
+            .map_or(0, |elem| elem.group)
+    });
+
     for elem in rtree.locate_in_envelope_intersecting_mut(aabb) {
         if settings.layer_filter_on && settings.layer != elem.layer {
             continue;
@@ -926,6 +968,11 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
             continue;
         }
         if !visibility_mask_allows(elem.visibility_mask, settings.visibility_mask) {
+            continue;
+        }
+        if let (Some(visibility), Some(from)) = (groups.0.as_ref(), group_from)
+            && !visibility.layer_visible(from, elem.group)
+        {
             continue;
         }
 
@@ -1374,6 +1421,7 @@ mod tests {
             .insert_resource(PendingMapLoad {
                 task: Some((2, pending_task(&pool))),
             })
+            .insert_resource(GroupVisibilityState::default())
             .add_systems(Update, load_map_system);
 
         // The last selection wins, including when it is the displayed map.

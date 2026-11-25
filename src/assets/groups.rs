@@ -1,3 +1,7 @@
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
 use byte::BytesExt;
 use byte::ctx::LittleEndian;
 
@@ -55,6 +59,35 @@ impl GroupVisibility {
         })
     }
 
+    /// Loads `groups.lib` from the map's gfx archive.
+    ///
+    /// The game configuration declares
+    /// `groupsFile=jar:file:./contents/maps/gfx/%d.jar!/groups.lib`, so the
+    /// visibility table lives in the same per-map jar as the map chunks.
+    pub fn load_from_map(maps_path: &Path, map_id: i32) -> Result<Self, String> {
+        let jar_path = maps_path.join("gfx").join(format!("{map_id}.jar"));
+        let file = File::open(&jar_path)
+            .map_err(|err| format!("failed to open {}: {err}", jar_path.display()))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|err| format!("failed to read {}: {err}", jar_path.display()))?;
+        let mut entry = archive.by_name("groups.lib").map_err(|err| {
+            format!("failed to find groups.lib in {}: {err}", jar_path.display())
+        })?;
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut bytes).map_err(|err| {
+            format!(
+                "failed to read groups.lib from {}: {err}",
+                jar_path.display()
+            )
+        })?;
+        Self::parse(&bytes).map_err(|err| {
+            format!(
+                "failed to parse groups.lib from {}: {err:?}",
+                jar_path.display()
+            )
+        })
+    }
+
     /// Returns whether `layer` (a group key) is visible from `from`.
     pub fn layer_visible(&self, from: i32, layer: i32) -> bool {
         if from == 0 {
@@ -76,6 +109,9 @@ impl GroupVisibility {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::path::PathBuf;
+
     use super::*;
 
     fn push_u16(buf: &mut Vec<u8>, value: u16) {
@@ -127,5 +163,61 @@ mod tests {
         push_i16(&mut bytes, 1);
         push_i16(&mut bytes, 2);
         assert!(GroupVisibility::parse(&bytes).is_err());
+    }
+
+    fn empty_visibility() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        push_u16(&mut bytes, 0); // layer_count -> 1
+        push_u16(&mut bytes, 0); // no entries
+        bytes
+    }
+
+    fn temporary_root(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "vakfu-groups-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    fn write_jar(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = File::create(path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn loads_groups_lib_from_the_map_jar() {
+        let root = temporary_root("jar");
+        let gfx = root.join("gfx");
+        std::fs::create_dir_all(&gfx).unwrap();
+        let groups = empty_visibility();
+        write_jar(&gfx.join("42.jar"), &[("groups.lib", &groups)]);
+
+        let visibility = GroupVisibility::load_from_map(&root, 42).unwrap();
+        assert_eq!(visibility.layer_count(), 1);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_groups_lib_is_an_error() {
+        let root = temporary_root("missing");
+        let gfx = root.join("gfx");
+        std::fs::create_dir_all(&gfx).unwrap();
+        write_jar(&gfx.join("7.jar"), &[("map", &[])]);
+
+        assert!(GroupVisibility::load_from_map(&root, 7).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

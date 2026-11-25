@@ -14,20 +14,22 @@ use anyhow::bail;
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::CameraUpdateSystems;
 use bevy::camera::visibility::RenderLayers;
+use bevy::log::warn;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use pico_args::Arguments;
 
-use crate::assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
+use crate::assets::{GroupVisibility, JarAssetSource, MapSpriteLibrary, TgamLoader};
 use crate::camera::{
     CameraController, MainCamera, OverlayCamera, OVERLAY_LAYER, WORLD_LAYER,
     camera_controller_system, camera_system,
 };
 use crate::premult_alpha;
 use crate::render::{
-    ChangeMapEvent, MapCatalog, MapRenderer, PendingMapLoad, animation_system, lighting_system,
-    load_map_system, load_renderer, rendering_system, sea_system,
+    ChangeMapEvent, GroupVisibilityState, MapCatalog, MapRenderer, PendingMapLoad,
+    animation_system, lighting_system, load_map_system, load_renderer, rendering_system,
+    sea_system,
 };
 use crate::settings::MapViewSettings;
 
@@ -101,6 +103,7 @@ pub struct LoadedWorld {
     pub renderer: MapRenderer,
     pub camera_controller: CameraController,
     pub asset_source: JarAssetSource,
+    pub group_visibility: Option<GroupVisibility>,
 }
 
 impl LoadedWorld {
@@ -143,6 +146,14 @@ impl LoadedWorld {
             anyhow::anyhow!("failed to open asset archive {}: {err}", gfx_path.display())
         })?;
 
+        let group_visibility = match GroupVisibility::load_from_map(&maps_path, map_id) {
+            Ok(visibility) => Some(visibility),
+            Err(err) => {
+                warn!("could not load group visibility: {err}");
+                None
+            }
+        };
+
         let renderer = load_renderer(&maps_path, map_id, &sprites)?;
         let center = renderer.center();
         let camera_controller = CameraController {
@@ -163,6 +174,7 @@ impl LoadedWorld {
             renderer,
             camera_controller,
             asset_source,
+            group_visibility,
         })
     }
 }
@@ -177,6 +189,7 @@ pub struct VakfuCorePlugin {
     pub catalog: MapCatalog,
     pub camera_controller: CameraController,
     pub asset_source: JarAssetSource,
+    pub group_visibility: Option<GroupVisibility>,
 }
 
 impl Plugin for VakfuCorePlugin {
@@ -207,6 +220,7 @@ impl Plugin for VakfuCorePlugin {
         .insert_resource(self.camera_controller.clone())
         .init_resource::<PendingMapLoad>()
         .init_resource::<MapViewSettings>()
+        .insert_resource(GroupVisibilityState(self.group_visibility.clone()))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -232,6 +246,7 @@ pub fn build_app(window_title: &str, world: LoadedWorld) -> App {
             catalog: world.catalog,
             camera_controller: world.camera_controller,
             asset_source: world.asset_source,
+            group_visibility: world.group_visibility,
         });
     app
 }
