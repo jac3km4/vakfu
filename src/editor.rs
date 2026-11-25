@@ -192,6 +192,8 @@ pub struct EditorState {
     ghost_def_id: Option<i32>,
     ghost_layouts: HashMap<i32, Handle<TextureAtlasLayout>>,
     pub history: EditorHistory,
+    /// Element state captured when an inspector drag/focus edit begins.
+    inspector_before: Option<Renderable>,
     last_map_id: Option<i32>,
 }
 
@@ -218,6 +220,7 @@ impl Default for EditorState {
             ghost_def_id: None,
             ghost_layouts: HashMap::new(),
             history: EditorHistory::default(),
+            inspector_before: None,
             last_map_id: None,
         }
     }
@@ -276,6 +279,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
         editor.selected_uid = None;
         editor.drag_state = None;
         editor.history.clear();
+        editor.inspector_before = None;
         let ground_z = renderer.default_ground_z();
         editor.hovered_surface_z = ground_z;
         if !editor.brush.snap_to_surface {
@@ -696,51 +700,62 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                 ui.separator();
                 let mut edited = elem.clone();
                 let mut changed = false;
+                let mut edit_started = false;
+                let mut edit_finished = false;
 
                 egui::Grid::new("element_inspector_grid")
                     .num_columns(2)
                     .spacing([8.0, 6.0])
                     .show(ui, |ui| {
                         ui.label("Cell X");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.cell_x).speed(0.2))
-                            .changed();
+                        let response = ui.add(egui::DragValue::new(&mut edited.cell_x).speed(0.2));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Cell Y");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.cell_y).speed(0.2))
-                            .changed();
+                        let response = ui.add(egui::DragValue::new(&mut edited.cell_y).speed(0.2));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Cell Z");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.cell_z).speed(0.2))
-                            .changed();
+                        let response = ui.add(egui::DragValue::new(&mut edited.cell_z).speed(0.2));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Height");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.height).speed(0.2))
-                            .changed();
+                        let response = ui.add(egui::DragValue::new(&mut edited.height).speed(0.2));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Alt Order");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.altitude_order).speed(0.2))
-                            .changed();
+                        let response =
+                            ui.add(egui::DragValue::new(&mut edited.altitude_order).speed(0.2));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Layer");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.layer).range(0..=127))
-                            .changed();
+                        let response =
+                            ui.add(egui::DragValue::new(&mut edited.layer).range(0..=127));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Group");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut edited.group))
-                            .changed();
+                        let response = ui.add(egui::DragValue::new(&mut edited.group));
+                        changed |= response.changed();
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
 
                         ui.label("Tint");
@@ -750,22 +765,42 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                             edited.color.blue,
                             edited.color.alpha,
                         ];
-                        if ui.color_edit_button_rgba_unmultiplied(&mut rgba).changed() {
-                            edited.color =
-                                LinearRgba::new(rgba[0], rgba[1], rgba[2], rgba[3]);
+                        let response = ui.color_edit_button_rgba_unmultiplied(&mut rgba);
+                        if response.changed() {
+                            edited.color = LinearRgba::new(rgba[0], rgba[1], rgba[2], rgba[3]);
                             edited.color_tinted = edited.color;
                             changed = true;
                         }
+                        edit_started |= response.drag_started() || response.gained_focus();
+                        edit_finished |= response.drag_stopped() || response.lost_focus();
                         ui.end_row();
                     });
 
+                // Close any previous session before opening a new one, so that
+                // moving focus between fields records the finished edit and
+                // baselines the field that just gained focus.
+                if edit_finished
+                    && let Some(before) = editor.inspector_before.take()
+                    && let Some(after) = renderer.get_element(before.uid).cloned()
+                    && after != before
+                {
+                    editor.history.push(EditAction::Replace { before, after });
+                }
+                if edit_started {
+                    editor.inspector_before = Some(elem.clone());
+                }
                 if changed {
                     edited.recompute_position(&renderer);
                     renderer.update_element(edited.clone());
-                    editor.history.push(EditAction::Replace {
-                        before: elem,
-                        after: edited,
-                    });
+                    // Edits that never opened a drag/focus session (such as a
+                    // colour popup) are recorded immediately; a tracked session
+                    // commits its final state once on release/focus loss.
+                    if editor.inspector_before.is_none() {
+                        editor.history.push(EditAction::Replace {
+                            before: elem,
+                            after: edited,
+                        });
+                    }
                 }
 
                 ui.separator();
