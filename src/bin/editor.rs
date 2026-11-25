@@ -1,24 +1,10 @@
-use std::fs;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use anyhow::bail;
-use bevy::asset::io::AssetSourceBuilder;
 use bevy::prelude::*;
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
-use pico_args::Arguments;
-use vakfu::assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
-use vakfu::camera::{CameraController, camera_controller_system, camera_system};
+use bevy_egui::EguiPrimaryContextPass;
+use vakfu::app::{Cli, LoadedWorld, build_app, egui_has_primary_context, parse_args};
+use vakfu::camera::camera_system;
 use vakfu::editor::{
     EditorState, editor_ghost_system, editor_input_system, editor_overlay_system, editor_ui_system,
 };
-use vakfu::premult_alpha;
-use vakfu::render::{
-    ChangeMapEvent, MapCatalog, PendingMapLoad, animation_system, load_map_system, load_renderer,
-    rendering_system,
-};
-use vakfu::settings::MapViewSettings;
 
 const HELP: &str = "\
 vakfu editor
@@ -35,103 +21,13 @@ OPTIONS:
 ";
 
 fn main() -> anyhow::Result<()> {
-    let mut pargs = Arguments::from_env();
-
-    if pargs.contains(["-h", "--help"]) {
-        print!("{HELP}");
+    let Cli::Run(args) = parse_args(HELP)? else {
         return Ok(());
-    }
-
-    let Some(game_path) = pargs.opt_value_from_str::<_, PathBuf>("--path")? else {
-        eprint!("{HELP}");
-        bail!("missing required option '--path'");
     };
-    let map_id_opt: Option<i32> = pargs.opt_value_from_str("--map")?;
+    let world = LoadedWorld::load(args.maps_path, args.map_id, true)?;
 
-    let remaining = pargs.finish();
-    if !remaining.is_empty() {
-        let args: Vec<String> = remaining
-            .into_iter()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        eprint!("{HELP}");
-        bail!("unexpected arguments: {}", args.join(", "));
-    }
-
-    let maps_path = game_path.join("contents").join("maps");
-
-    let available_maps = match get_map_list(&maps_path) {
-        Ok(ids) if !ids.is_empty() => ids,
-        Ok(_) => bail!("no map files found in {}", maps_path.join("gfx").display()),
-        Err(err) => bail!(
-            "could not read maps directory {}: {err}",
-            maps_path.join("gfx").display()
-        ),
-    };
-
-    let map_id = match map_id_opt {
-        Some(id) => {
-            if !available_maps.contains(&id) {
-                bail!("map {id} not found in {}", maps_path.join("gfx").display());
-            }
-            id
-        }
-        None => available_maps[0],
-    };
-
-    let lib_path = maps_path.join("data.jar");
-    let sprites = Arc::new(MapSpriteLibrary::load(File::open(&lib_path).map_err(
-        |err| {
-            anyhow::anyhow!(
-                "failed to open sprite library {}: {err}",
-                lib_path.display()
-            )
-        },
-    )?)?);
-    let gfx_path = maps_path.join("gfx.jar");
-    let asset_source = JarAssetSource::new(&gfx_path).map_err(|err| {
-        anyhow::anyhow!("failed to open asset archive {}: {err}", gfx_path.display())
-    })?;
-    let renderer = load_renderer(&maps_path, map_id, &sprites)?;
-
-    let initial_center = renderer.center();
-    let camera_controller = CameraController {
-        target_position: Vec3::new(initial_center.x, initial_center.y, 0.0),
-        current_position: Vec3::new(initial_center.x, initial_center.y, 0.0),
-        editor_mode: true,
-        ..CameraController::default()
-    };
-
-    let map_catalog = MapCatalog {
-        maps_path,
-        sprites,
-        available_maps,
-        current_map_id: map_id,
-    };
-
-    App::new()
-        .register_asset_source(
-            "gfx",
-            AssetSourceBuilder::new(move || Box::new(asset_source.clone())),
-        )
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "vakfu editor".into(),
-                ..default()
-            }),
-            ..default()
-        }))
-        .add_plugins(premult_alpha::PremultAlphaPlugin)
-        .add_plugins(EguiPlugin::default())
-        .init_asset_loader::<TgamLoader>()
-        .add_message::<ChangeMapEvent>()
-        .insert_resource(map_catalog)
-        .insert_resource(renderer)
-        .insert_resource(camera_controller)
-        .init_resource::<PendingMapLoad>()
-        .init_resource::<MapViewSettings>()
-        .init_resource::<EditorState>()
-        .add_systems(Startup, setup)
+    let mut app = build_app("vakfu editor", world);
+    app.init_resource::<EditorState>()
         .add_systems(
             EguiPrimaryContextPass,
             editor_ui_system.run_if(egui_has_primary_context),
@@ -139,45 +35,14 @@ fn main() -> anyhow::Result<()> {
         .add_systems(
             Update,
             (
-                load_map_system,
-                camera_controller_system,
-                camera_system,
                 editor_input_system,
                 editor_ghost_system,
                 editor_overlay_system,
-                rendering_system,
-                animation_system,
             )
-                .chain(),
-        )
-        .run();
+                .chain()
+                .after(camera_system),
+        );
+    app.run();
 
     Ok(())
-}
-
-fn setup(mut commands: Commands<'_, '_>, camera_controller: Res<'_, CameraController>) {
-    commands.spawn((
-        Camera2d,
-        CompositingSpace::Linear,
-        Transform::from_translation(camera_controller.current_position),
-    ));
-}
-
-fn egui_has_primary_context(
-    query: Query<'_, '_, &bevy_egui::EguiContext, With<PrimaryEguiContext>>,
-) -> bool {
-    !query.is_empty()
-}
-
-fn get_map_list(maps_path: &Path) -> anyhow::Result<Vec<i32>> {
-    let mut map_ids: Vec<i32> = fs::read_dir(maps_path.join("gfx"))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|entry| entry.extension() == Some("jar".as_ref()))
-        .filter_map(|entry| entry.file_stem()?.to_str()?.parse::<i32>().ok())
-        .collect();
-    map_ids.sort_unstable();
-    map_ids.dedup();
-
-    Ok(map_ids)
 }
