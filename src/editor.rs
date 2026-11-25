@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
 use bevy::input::mouse::MouseButtonInput;
 use bevy::prelude::*;
@@ -10,7 +13,8 @@ use rstar::RTreeObject;
 use crate::assets::{Animation, iso_cell_diamond, iso_to_screen, screen_to_iso};
 use crate::camera::{CameraController, is_pointer_over_ui};
 use crate::render::{
-    ChangeMapEvent, MapCatalog, MapRenderer, Renderable, atlas_layout_parts, premultiplied_tint,
+    ChangeMapEvent, MapCatalog, MapRenderer, Renderable, RenderableSpec, atlas_layout_parts,
+    premultiplied_tint,
 };
 use crate::settings::MapViewSettings;
 
@@ -244,17 +248,29 @@ impl EditorState {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn editor_ui_system(
-    mut contexts: EguiContexts<'_, '_>,
-    assets: Res<'_, AssetServer>,
-    mut settings: ResMut<'_, MapViewSettings>,
-    catalog: Res<'_, MapCatalog>,
-    mut renderer: ResMut<'_, MapRenderer>,
-    mut camera_controller: ResMut<'_, CameraController>,
-    mut editor: ResMut<'_, EditorState>,
-    mut change_map: MessageWriter<'_, ChangeMapEvent>,
-) -> Result {
+#[derive(SystemParam)]
+pub struct EditorUiParams<'w, 's> {
+    contexts: EguiContexts<'w, 's>,
+    assets: Res<'w, AssetServer>,
+    settings: ResMut<'w, MapViewSettings>,
+    catalog: Res<'w, MapCatalog>,
+    renderer: ResMut<'w, MapRenderer>,
+    camera_controller: ResMut<'w, CameraController>,
+    editor: ResMut<'w, EditorState>,
+    change_map: MessageWriter<'w, ChangeMapEvent>,
+}
+
+pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
+    let EditorUiParams {
+        mut contexts,
+        assets,
+        mut settings,
+        catalog,
+        mut renderer,
+        mut camera_controller,
+        mut editor,
+        mut change_map,
+    } = params;
     if editor.last_map_id != Some(catalog.current_map_id) {
         editor.last_map_id = Some(catalog.current_map_id);
         editor.selected_uid = None;
@@ -869,21 +885,37 @@ pub fn editor_ui_system(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn editor_input_system(
-    time: Res<'_, Time>,
-    images: Res<'_, Assets<Image>>,
-    keys: Res<'_, ButtonInput<KeyCode>>,
-    mut mouse_buttons: MessageReader<'_, '_, MouseButtonInput>,
-    windows: Query<'_, '_, &Window>,
-    cameras: Query<'_, '_, (&Camera, &GlobalTransform)>,
-    camera_controller: Res<'_, CameraController>,
-    mut egui_contexts: Query<'_, '_, &mut bevy_egui::EguiContext, With<PrimaryEguiContext>>,
-    catalog: Res<'_, MapCatalog>,
-    settings: Res<'_, MapViewSettings>,
-    mut renderer: ResMut<'_, MapRenderer>,
-    mut editor: ResMut<'_, EditorState>,
-) {
+#[derive(SystemParam)]
+pub struct EditorInputParams<'w, 's> {
+    time: Res<'w, Time>,
+    images: Res<'w, Assets<Image>>,
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    mouse_buttons: MessageReader<'w, 's, MouseButtonInput>,
+    windows: Query<'w, 's, &'static Window>,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform)>,
+    camera_controller: Res<'w, CameraController>,
+    egui_contexts: Query<'w, 's, &'static mut bevy_egui::EguiContext, With<PrimaryEguiContext>>,
+    catalog: Res<'w, MapCatalog>,
+    settings: Res<'w, MapViewSettings>,
+    renderer: ResMut<'w, MapRenderer>,
+    editor: ResMut<'w, EditorState>,
+}
+
+pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
+    let EditorInputParams {
+        time,
+        images,
+        keys,
+        mut mouse_buttons,
+        windows,
+        cameras,
+        camera_controller,
+        mut egui_contexts,
+        catalog,
+        settings,
+        mut renderer,
+        mut editor,
+    } = params;
     let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
     let canvas_rect = camera_controller.canvas_rect;
     let (is_over_egui, wants_keyboard) =
@@ -1056,16 +1088,15 @@ pub fn editor_input_system(
                         editor.painting_active = true;
                         editor.last_painted_cell = None;
                         if let Some(cell) = editor.hovered_cell {
-                            place_at_cell(
-                                &mut editor,
-                                &mut renderer,
-                                &catalog,
-                                &settings,
-                                &images,
+                            PlacementContext {
+                                editor: &mut editor,
+                                renderer: &mut renderer,
+                                catalog: &catalog,
+                                settings: &settings,
+                                images: &images,
                                 elapsed,
-                                cell,
-                                Some(world_pos),
-                            );
+                            }
+                            .place_at_cell(cell, Some(world_pos));
                             editor.last_painted_cell = Some(cell);
                         }
                     }
@@ -1124,16 +1155,15 @@ pub fn editor_input_system(
             && editor.last_painted_cell != Some(cell)
         {
             let wp = editor.hovered_world;
-            place_at_cell(
-                &mut editor,
-                &mut renderer,
-                &catalog,
-                &settings,
-                &images,
+            PlacementContext {
+                editor: &mut editor,
+                renderer: &mut renderer,
+                catalog: &catalog,
+                settings: &settings,
+                images: &images,
                 elapsed,
-                cell,
-                wp,
-            );
+            }
+            .place_at_cell(cell, wp);
             editor.last_painted_cell = Some(cell);
         } else if editor.erasing_active
             && let Some(world_pos) = editor.hovered_world
@@ -1151,59 +1181,68 @@ pub fn editor_input_system(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn place_at_cell(
-    editor: &mut EditorState,
-    renderer: &mut MapRenderer,
-    catalog: &MapCatalog,
-    settings: &MapViewSettings,
-    images: &Assets<Image>,
-    elapsed: std::time::Duration,
-    (cell_x, cell_y): (i32, i32),
-    world_pos: Option<Vec2>,
-) {
-    let Some(def_id) = editor.brush.definition_id else {
-        return;
-    };
-    let Some(def) = catalog.sprites.get(def_id) else {
-        return;
-    };
-    let eff_z = editor.effective_brush_z();
-    let alt_order = editor
-        .brush
-        .altitude_order
-        .max(renderer.next_altitude_order_at(cell_x, cell_y));
+/// The editor state and read-only context needed to place elements.
+struct PlacementContext<'a> {
+    editor: &'a mut EditorState,
+    renderer: &'a mut MapRenderer,
+    catalog: &'a MapCatalog,
+    settings: &'a MapViewSettings,
+    images: &'a Assets<Image>,
+    elapsed: Duration,
+}
 
-    let (cx, cy) = iso_to_screen(cell_x, cell_y, i32::from(eff_z));
-    let mut surface_z_order: Option<f32> = renderer
-        .pick_at_world(cx, cy, settings, images, elapsed)
-        .map(|p| p.position.z);
-    if let Some(wp) = world_pos
-        && let Some(picked) = renderer.pick_at_world(wp.x, wp.y, settings, images, elapsed)
-    {
-        surface_z_order = Some(surface_z_order.map_or(picked.position.z, |z| z.max(picked.position.z)));
-    }
+impl PlacementContext<'_> {
+    fn place_at_cell(&mut self, (cell_x, cell_y): (i32, i32), world_pos: Option<Vec2>) {
+        let Some(def_id) = self.editor.brush.definition_id else {
+            return;
+        };
+        let Some(def) = self.catalog.sprites.get(def_id) else {
+            return;
+        };
+        let eff_z = self.editor.effective_brush_z();
+        let alt_order = self
+            .editor
+            .brush
+            .altitude_order
+            .max(self.renderer.next_altitude_order_at(cell_x, cell_y));
 
-    let [r, g, b, a] = editor.brush.color;
-    let mut elem = renderer.build_renderable(
-        def,
-        cell_x,
-        cell_y,
-        eff_z,
-        editor.brush.height,
-        alt_order,
-        editor.brush.group,
-        editor.brush.layer,
-        LinearRgba::new(r, g, b, a),
-    );
-    if let Some(min_front_z) = surface_z_order
-        && elem.position.z <= min_front_z
-    {
-        elem.position.z = renderer.compute_z_above(min_front_z, elem.envelope(), None);
+        let (cx, cy) = iso_to_screen(cell_x, cell_y, i32::from(eff_z));
+        let mut surface_z_order: Option<f32> = self
+            .renderer
+            .pick_at_world(cx, cy, self.settings, self.images, self.elapsed)
+            .map(|p| p.position.z);
+        if let Some(wp) = world_pos
+            && let Some(picked) =
+                self.renderer
+                    .pick_at_world(wp.x, wp.y, self.settings, self.images, self.elapsed)
+        {
+            surface_z_order =
+                Some(surface_z_order.map_or(picked.position.z, |z| z.max(picked.position.z)));
+        }
+
+        let [r, g, b, a] = self.editor.brush.color;
+        let mut elem = self.renderer.build_renderable(RenderableSpec {
+            def,
+            cell_x,
+            cell_y,
+            cell_z: eff_z,
+            height: self.editor.brush.height,
+            altitude_order: alt_order,
+            group: self.editor.brush.group,
+            layer: self.editor.brush.layer,
+            color: LinearRgba::new(r, g, b, a),
+        });
+        if let Some(min_front_z) = surface_z_order
+            && elem.position.z <= min_front_z
+        {
+            elem.position.z = self
+                .renderer
+                .compute_z_above(min_front_z, elem.envelope(), None);
+        }
+        self.editor.selected_uid = Some(elem.uid);
+        self.renderer.insert_element(elem.clone());
+        self.editor.history.push(EditAction::Place(elem));
     }
-    editor.selected_uid = Some(elem.uid);
-    renderer.insert_element(elem.clone());
-    editor.history.push(EditAction::Place(elem));
 }
 
 fn duplicate_selected(editor: &mut EditorState, renderer: &mut MapRenderer, uid: u64) {
@@ -1219,18 +1258,31 @@ fn duplicate_selected(editor: &mut EditorState, renderer: &mut MapRenderer, uid:
     editor.history.push(EditAction::Place(dup));
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn editor_ghost_system(
-    mut commands: Commands<'_, '_>,
-    assets: Res<'_, AssetServer>,
-    mut atlas_layouts: ResMut<'_, Assets<TextureAtlasLayout>>,
-    catalog: Res<'_, MapCatalog>,
-    windows: Query<'_, '_, &Window>,
-    camera_controller: Res<'_, CameraController>,
-    mut editor: ResMut<'_, EditorState>,
-    mut egui_contexts: Query<'_, '_, &mut bevy_egui::EguiContext, With<PrimaryEguiContext>>,
-    mut ghosts: Query<'_, '_, (&mut Sprite, &mut Transform)>,
-) {
+#[derive(SystemParam)]
+pub struct EditorGhostParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    assets: Res<'w, AssetServer>,
+    atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
+    catalog: Res<'w, MapCatalog>,
+    windows: Query<'w, 's, &'static Window>,
+    camera_controller: Res<'w, CameraController>,
+    editor: ResMut<'w, EditorState>,
+    egui_contexts: Query<'w, 's, &'static mut bevy_egui::EguiContext, With<PrimaryEguiContext>>,
+    ghosts: Query<'w, 's, (&'static mut Sprite, &'static mut Transform)>,
+}
+
+pub fn editor_ghost_system(params: EditorGhostParams<'_, '_>) {
+    let EditorGhostParams {
+        mut commands,
+        assets,
+        mut atlas_layouts,
+        catalog,
+        windows,
+        camera_controller,
+        mut editor,
+        mut egui_contexts,
+        mut ghosts,
+    } = params;
     let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
     let canvas_rect = camera_controller.canvas_rect;
     let is_over_egui = egui_contexts

@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
 use bevy::input::mouse::{MouseButtonInput, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -63,17 +64,30 @@ pub fn is_pointer_over_ui(
     false
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(SystemParam)]
+pub struct CameraInput<'w, 's> {
+    time: Res<'w, Time>,
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    windows: Query<'w, 's, &'static Window>,
+    mouse_button_input_events: MessageReader<'w, 's, MouseButtonInput>,
+    cursor_moved_events: MessageReader<'w, 's, CursorMoved>,
+    mouse_wheel_events: MessageReader<'w, 's, MouseWheel>,
+    egui_contexts: Query<'w, 's, &'static mut EguiContext, With<PrimaryEguiContext>>,
+}
+
 pub fn camera_controller_system(
-    time: Res<'_, Time>,
-    keys: Res<'_, ButtonInput<KeyCode>>,
-    windows: Query<'_, '_, &Window>,
-    mut mouse_button_input_events: MessageReader<'_, '_, MouseButtonInput>,
-    mut cursor_moved_events: MessageReader<'_, '_, CursorMoved>,
-    mut mouse_wheel_events: MessageReader<'_, '_, MouseWheel>,
+    input: CameraInput<'_, '_>,
     mut state: ResMut<'_, CameraController>,
-    mut egui_contexts: Query<'_, '_, &mut EguiContext, With<PrimaryEguiContext>>,
 ) {
+    let CameraInput {
+        time,
+        keys,
+        windows,
+        mut mouse_button_input_events,
+        mut cursor_moved_events,
+        mut mouse_wheel_events,
+        mut egui_contexts,
+    } = input;
     let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
     let canvas_rect = state.canvas_rect;
     let (is_over_egui, wants_keyboard) = egui_contexts

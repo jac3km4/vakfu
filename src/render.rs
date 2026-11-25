@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures_lite::future};
@@ -59,6 +60,20 @@ pub struct MapRenderer {
     center: Vec2,
     used_definitions: Vec<i32>,
     available_layers: Vec<u8>,
+}
+
+/// The definition-independent inputs for placing a sprite.
+#[derive(Clone, Copy)]
+pub struct RenderableSpec<'a> {
+    pub def: &'a MapSpriteDefinition,
+    pub cell_x: i32,
+    pub cell_y: i32,
+    pub cell_z: i16,
+    pub height: u8,
+    pub altitude_order: u8,
+    pub group: i32,
+    pub layer: u8,
+    pub color: LinearRgba,
 }
 
 impl MapRenderer {
@@ -294,19 +309,18 @@ impl MapRenderer {
             .map_or(0, |max_alt| max_alt.saturating_add(1))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn build_renderable(
-        &mut self,
-        def: &MapSpriteDefinition,
-        cell_x: i32,
-        cell_y: i32,
-        cell_z: i16,
-        height: u8,
-        altitude_order: u8,
-        group: i32,
-        layer: u8,
-        color: LinearRgba,
-    ) -> Renderable {
+    pub fn build_renderable(&mut self, spec: RenderableSpec<'_>) -> Renderable {
+        let RenderableSpec {
+            def,
+            cell_x,
+            cell_y,
+            cell_z,
+            height,
+            altitude_order,
+            group,
+            layer,
+            color,
+        } = spec;
         let uid = self.allocate_uid();
         let (sx, sy) = iso_to_screen(cell_x, cell_y, i32::from(cell_z) - i32::from(height));
         let (origin_x, origin_y) = def.origin();
@@ -604,16 +618,27 @@ pub fn load_map_system(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn rendering_system(
-    mut commands: Commands<'_, '_>,
-    assets: Res<'_, AssetServer>,
-    cameras: Query<'_, '_, (Ref<'_, Camera>, Ref<'_, Transform>)>,
-    mut atlas_layouts: ResMut<'_, Assets<TextureAtlasLayout>>,
-    mut render_state: ResMut<'_, MapRenderer>,
-    settings: Res<'_, MapViewSettings>,
-    mut sprites: Query<'_, '_, (&mut Sprite, &mut Transform), Without<Camera>>,
-) -> Result {
+#[derive(SystemParam)]
+pub struct RenderParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    assets: Res<'w, AssetServer>,
+    cameras: Query<'w, 's, (Ref<'static, Camera>, Ref<'static, Transform>)>,
+    atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
+    render_state: ResMut<'w, MapRenderer>,
+    settings: Res<'w, MapViewSettings>,
+    sprites: Query<'w, 's, (&'static mut Sprite, &'static mut Transform), Without<Camera>>,
+}
+
+pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
+    let RenderParams {
+        mut commands,
+        assets,
+        cameras,
+        mut atlas_layouts,
+        mut render_state,
+        settings,
+        mut sprites,
+    } = params;
     if !render_state.pending_despawns.is_empty() {
         for entity in render_state.pending_despawns.drain(..) {
             if commands.get_entity(entity).is_ok() {
