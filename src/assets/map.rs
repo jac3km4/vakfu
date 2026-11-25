@@ -267,6 +267,11 @@ fn alpha_to_f32(value: i8) -> f32 {
 /// - `0x1` (bit 0): Indicates the presence of an RGB tint.
 /// - `0x2` (bit 1): Indicates the presence of an Alpha channel.
 /// - `0x4` (bit 2): Indicates the presence of a color gradient (requiring two color values).
+///
+/// The bits are independent, so alpha-only (`0x2`), gradient-only (`0x4`) and
+/// alpha-only gradients (`0x6`) are valid entries. The reference's
+/// `ScreenElement.readColors` only reads a second color when the tint bit is
+/// also set, so `0x4` carries no payload and `0x6` carries only an alpha byte.
 #[derive(Debug, Clone, Copy, TryRead)]
 #[byte(tag_type = u8)]
 pub enum Color {
@@ -276,12 +281,21 @@ pub enum Color {
     /// A single RGB tint.
     #[byte(tag = 0x1)]
     Rgb(Rgb),
+    /// An alpha-only override with no RGB tint.
+    #[byte(tag = 0x2)]
+    Alpha(i8),
     /// An RGBA tint, including transparency.
     #[byte(tag = 0x3)]
     Rgba(Rgba),
+    /// A gradient flag with no colour components.
+    #[byte(tag = 0x4)]
+    Gradient,
     /// A gradient between two RGB values.
     #[byte(tag = 0x5)]
     RgbGradient(Rgb, #[allow(dead_code)] Rgb),
+    /// An alpha-only override on a gradient element.
+    #[byte(tag = 0x6)]
+    AlphaGradient(i8),
     /// A gradient between two RGBA values.
     #[byte(tag = 0x7)]
     RgbaGradient(Rgba, #[allow(dead_code)] Rgba),
@@ -297,11 +311,17 @@ impl Color {
     pub fn to_f32_array(self) -> [f32; 4] {
         match self {
             Color::Rgb(rgb) => [rgb_to_f32(rgb.r), rgb_to_f32(rgb.g), rgb_to_f32(rgb.b), 1.],
+            Color::Alpha(alpha) => [1., 1., 1., alpha_to_f32(alpha)],
             Color::Rgba(rgba) => rgba.to_f32_array(),
-            // No tint and gradients are both left untinted: the engine defaults
-            // RGB to 0.5 (identity after the 2x scale) and alpha to 1.0, and
-            // skips colour processing for gradients entirely.
-            Color::None | Color::RgbGradient(..) | Color::RgbaGradient(..) => [1., 1., 1., 1.],
+            // No tint, alpha-only gradients and gradient elements are all left
+            // untinted: the engine defaults RGB to 0.5 (identity after the 2x
+            // scale) and alpha to 1.0, and skips colour processing for
+            // gradients entirely.
+            Color::None
+            | Color::Gradient
+            | Color::AlphaGradient(_)
+            | Color::RgbGradient(..)
+            | Color::RgbaGradient(..) => [1., 1., 1., 1.],
         }
     }
 }
@@ -668,6 +688,14 @@ mod tests {
             Color::Rgb(Rgb { r: 0, g: 0, b: 0 }).to_f32_array(),
             [1.0, 1.0, 1.0, 1.0]
         );
+        // Alpha-only entries leave RGB at the default tint and carry alpha.
+        assert_eq!(Color::Alpha(0).to_f32_array(), [1.0, 1.0, 1.0, 0.5]);
+        // Gradient-only entries skip colour processing like the reference.
+        assert_eq!(Color::Gradient.to_f32_array(), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(
+            Color::AlphaGradient(0).to_f32_array(),
+            [1.0, 1.0, 1.0, 1.0]
+        );
         // Gradients are left untinted, matching the reference engine.
         assert_eq!(
             Color::RgbGradient(Rgb { r: 127, g: -128, b: 0 }, Rgb::default()).to_f32_array(),
@@ -682,5 +710,22 @@ mod tests {
         })
         .to_f32_array();
         assert_eq!(rgba, [1.0, 1.0, 1.0, 0.5]);
+    }
+
+    #[test]
+    fn alpha_only_and_gradient_colour_tags_parse() {
+        use byte::ctx::LittleEndian;
+
+        let (alpha, consumed) = Color::try_read(&[0x02, 0x40], LittleEndian).unwrap();
+        assert_eq!(consumed, 2);
+        assert!(matches!(alpha, Color::Alpha(0x40)));
+
+        let (gradient, consumed) = Color::try_read(&[0x04], LittleEndian).unwrap();
+        assert_eq!(consumed, 1);
+        assert!(matches!(gradient, Color::Gradient));
+
+        let (alpha_gradient, consumed) = Color::try_read(&[0x06, 0x20], LittleEndian).unwrap();
+        assert_eq!(consumed, 2);
+        assert!(matches!(alpha_gradient, Color::AlphaGradient(0x20)));
     }
 }
