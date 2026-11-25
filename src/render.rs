@@ -11,8 +11,8 @@ use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
-    Animation, Frames, LightMap, Map, MapChunk, MapElementDetails, MapSpriteDefinition,
-    MapSpriteLibrary, element_hashcode, iso_to_screen, round_up_to_power_of_two,
+    Animation, Frames, LightMap, Map, MapChunk, MapSpriteDefinition, MapSpriteLibrary,
+    element_hashcode, iso_to_screen, round_up_to_power_of_two, sorted_altitude_order,
 };
 use crate::camera::CameraController;
 use crate::settings::MapViewSettings;
@@ -68,7 +68,12 @@ impl MapRenderer {
             .iter()
             .flat_map(MapChunk::elements)
             .collect::<Vec<_>>();
-        elements.sort_by_key(MapElementDetails::hashcode);
+        elements.sort_by_key(|elem| {
+            let before_mobile = sprites
+                .get(elem.definition_id())
+                .is_some_and(|def| def.flags().is_before_mobile());
+            elem.hashcode(before_mobile)
+        });
 
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -89,10 +94,16 @@ impl MapRenderer {
                     warn!("Unknown sprite definition {}", elem.definition_id());
                     return None;
                 };
+                // Elements without the export bit are editor-only helpers and
+                // are hidden by the reference renderer.
+                if def.export_mask() & 0x1 == 0 {
+                    return None;
+                }
                 let Some(group) = elem.group() else {
                     warn!("Missing group for element {}", elem.definition_id());
                     return None;
                 };
+                let before_mobile = def.flags().is_before_mobile();
 
                 let (x, y) = elem.screen_position();
                 let (origin_x, origin_y) = def.origin();
@@ -135,7 +146,8 @@ impl MapRenderer {
                     cell_z: elem.cell_z(),
                     height: elem.height(),
                     altitude_order: elem.altitude_order(),
-                    hashcode: elem.hashcode(),
+                    before_mobile,
+                    hashcode: elem.hashcode(before_mobile),
                     texture_size: UVec2::new(sample_width.into(), sample_height.into()),
                     render_size: UVec2::new(display_width.into(), display_height.into()),
                     color,
@@ -302,7 +314,12 @@ impl MapRenderer {
         let y = sy + origin_y as f32;
         let (sample_width, sample_height) = def.size();
         let (display_width, display_height) = def.texture_size();
-        let hashcode = element_hashcode(cell_x, cell_y, altitude_order);
+        let before_mobile = def.flags().is_before_mobile();
+        let hashcode = element_hashcode(
+            cell_x,
+            cell_y,
+            sorted_altitude_order(altitude_order, before_mobile),
+        );
         let envelope = AABB::from_corners(
             (x, y),
             (x + f32::from(display_width), y - f32::from(display_height)),
@@ -319,6 +336,7 @@ impl MapRenderer {
             cell_z,
             height,
             altitude_order,
+            before_mobile,
             hashcode,
             texture_size: UVec2::new(sample_width.into(), sample_height.into()),
             render_size: UVec2::new(display_width.into(), display_height.into()),
@@ -450,6 +468,7 @@ pub struct Renderable {
     pub cell_z: i16,
     pub height: u8,
     pub altitude_order: u8,
+    pub before_mobile: bool,
     pub hashcode: i64,
     pub texture_size: UVec2,
     pub render_size: UVec2,
@@ -480,7 +499,11 @@ impl Renderable {
         );
         self.position.x = sx - self.origin.0 as f32;
         self.position.y = sy + self.origin.1 as f32;
-        self.hashcode = element_hashcode(self.cell_x, self.cell_y, self.altitude_order);
+        self.hashcode = element_hashcode(
+            self.cell_x,
+            self.cell_y,
+            sorted_altitude_order(self.altitude_order, self.before_mobile),
+        );
         self.position.z = renderer.compute_z_for(self.envelope(), self.hashcode, Some(self.uid));
     }
 }
@@ -1039,6 +1062,7 @@ mod tests {
             cell_z: 0,
             height: 0,
             altitude_order: 1,
+            before_mobile: false,
             hashcode: 1,
             texture_size: UVec2::new(2, 2),
             render_size: UVec2::new(20, 20),
@@ -1063,6 +1087,7 @@ mod tests {
             cell_z: 0,
             height: 0,
             altitude_order: 0,
+            before_mobile: false,
             hashcode: 0,
             texture_size: UVec2::new(2, 2),
             render_size: UVec2::new(20, 20),
@@ -1115,6 +1140,7 @@ mod tests {
             cell_z: 0,
             height: 0,
             altitude_order: 0,
+            before_mobile: false,
             hashcode: 0,
             texture_size: UVec2::splat(10),
             render_size: UVec2::splat(10),
@@ -1137,6 +1163,7 @@ mod tests {
             cell_z: 0,
             height: 0,
             altitude_order: 1,
+            before_mobile: false,
             hashcode: 1,
             texture_size: UVec2::splat(10),
             render_size: UVec2::splat(10),

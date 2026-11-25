@@ -37,7 +37,6 @@ pub struct MapSpriteDefinition {
     #[allow(dead_code)]
     visibility_mask: u8,
     /// A bitmask controlling export rules.
-    #[allow(dead_code)]
     export_mask: u8,
     /// The shader ID to apply when drawing the sprite.
     #[allow(dead_code)]
@@ -77,6 +76,14 @@ impl MapSpriteDefinition {
     /// Returns the flags associated with the sprite.
     pub fn flags(&self) -> SpriteFlags {
         self.flags
+    }
+
+    /// Returns the export mask.
+    ///
+    /// The reference renderer hides elements whose bit `0` is unset
+    /// (`(EXPORT_MASK & exportMask) == 0`); they are editor-only helpers.
+    pub fn export_mask(&self) -> u8 {
+        self.export_mask
     }
 
     /// Returns the sampled texture rectangle dimensions `(width, height)`.

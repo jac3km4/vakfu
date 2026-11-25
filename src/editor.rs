@@ -1528,6 +1528,7 @@ mod tests {
             cell_z: 0,
             height: 0,
             altitude_order: 0,
+            before_mobile: false,
             hashcode: 0,
             texture_size: UVec2::new(32, 32),
             render_size: UVec2::new(32, 32),

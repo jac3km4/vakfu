@@ -108,14 +108,14 @@ impl MapChunk {
 #[derive(Debug)]
 struct MapSubChunk {
     /// The minimum relative X coordinate of the sub-chunk area.
-    min_x: i8,
+    min_x: u8,
     /// The maximum relative X coordinate of the sub-chunk area.
     #[allow(dead_code)]
-    max_x: i8,
+    max_x: u8,
     /// The minimum relative Y coordinate of the sub-chunk area.
-    min_y: i8,
+    min_y: u8,
     /// The maximum relative Y coordinate of the sub-chunk area.
-    max_y: i8,
+    max_y: u8,
 
     /// The cells contained within this sub-chunk area.
     cells: Vec<MapCell>,
@@ -124,10 +124,12 @@ struct MapSubChunk {
 impl<'a, C: Endianess> TryRead<'a, C> for MapSubChunk {
     fn try_read(bytes: &'a [u8], ctx: C) -> byte::Result<(Self, usize)> {
         let offset = &mut 0;
-        let min_x: i8 = bytes.read(offset, ctx)?;
-        let max_x: i8 = bytes.read(offset, ctx)?;
-        let min_y: i8 = bytes.read(offset, ctx)?;
-        let max_y: i8 = bytes.read(offset, ctx)?;
+        // Bounds are unsigned bytes (`readByte() & 0xFF` in the reference
+        // reader); parsing them as `i8` rejected or wrapped values >= 128.
+        let min_x: u8 = bytes.read(offset, ctx)?;
+        let max_x: u8 = bytes.read(offset, ctx)?;
+        let min_y: u8 = bytes.read(offset, ctx)?;
+        let max_y: u8 = bytes.read(offset, ctx)?;
 
         let width = i32::from(max_x) - i32::from(min_x);
         let height = i32::from(max_y) - i32::from(min_y);
@@ -356,9 +358,15 @@ impl<'a> MapElementDetails<'a> {
     }
 
     /// Computes the hashcode used primarily for determining rendering depth order (z-sorting).
-    /// It relies on cell coordinates (`x` and `y`) along with the element's `altitude_order`.
-    pub fn hashcode(&self) -> i64 {
-        element_hashcode(self.cell_x, self.cell_y, self.element.altitude_order)
+    ///
+    /// It relies on cell coordinates (`x` and `y`) along with the element's
+    /// `altitude_order`, adjusted for the `is_before_mobile` sprite flag.
+    pub fn hashcode(&self, is_before_mobile: bool) -> i64 {
+        element_hashcode(
+            self.cell_x,
+            self.cell_y,
+            sorted_altitude_order(self.element.altitude_order, is_before_mobile),
+        )
     }
 
     /// Returns the Z (altitude) coordinate of the element.
@@ -377,11 +385,26 @@ impl<'a> MapElementDetails<'a> {
     }
 }
 
+/// The number of layers in the reference `LayerOrder` enum.
+const LAYER_COUNT: u16 = 13;
+
 /// Computes the depth-sorting hashcode from cell coordinates and `altitude_order`.
-pub fn element_hashcode(cell_x: i32, cell_y: i32, altitude_order: u8) -> i64 {
-    (altitude_order as i64 & 0x1FFFi64) << 6i64
+pub fn element_hashcode(cell_x: i32, cell_y: i32, altitude_order: u16) -> i64 {
+    (i64::from(altitude_order) & 0x1FFFi64) << 6i64
         | ((cell_x as i64 + 8192i64) & 0x3FFFi64) << 19i64
         | ((cell_y as i64 + 8192i64) & 0x3FFFi64) << 34i64
+}
+
+/// Returns the altitude order used for depth sorting.
+///
+/// Elements flagged `is_before_mobile` are pushed above the other ground
+/// layers by `LAYER_COUNT - 1`, matching `DisplayedScreenElement`.
+pub fn sorted_altitude_order(altitude_order: u8, is_before_mobile: bool) -> u16 {
+    if is_before_mobile {
+        u16::from(altitude_order) + (LAYER_COUNT - 1)
+    } else {
+        u16::from(altitude_order)
+    }
 }
 
 /// Converts isometric coordinates `(x, y)` and `height` to screen coordinates.
