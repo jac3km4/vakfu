@@ -115,7 +115,7 @@ impl MapRenderer {
                 let [r, g, b, a] = elem.color().to_f32_array();
                 let color = LinearRgba::new(r, g, b, a);
                 let color_tinted = {
-                    let [r, g, b] = light_def.ambiance_light;
+                    let [r, g, b] = light_def.effective_day_color();
                     LinearRgba::new(color.red * r, color.green * g, color.blue * b, color.alpha)
                 };
 

@@ -9,13 +9,11 @@ use crate::assets::AssetError;
 
 pub struct LightDef {
     pub ambiance_light: [f32; 3],
-    #[allow(dead_code)]
     pub shadows: [f32; 3],
     #[allow(dead_code)]
     pub lights: [f32; 3],
     #[allow(dead_code)]
     pub allow_outdoor_lighting: bool,
-    #[allow(dead_code)]
     pub has_shadows: bool,
     #[allow(dead_code)]
     pub night_light: [f32; 3],
@@ -30,6 +28,26 @@ impl LightDef {
         has_shadows: false,
         night_light: [0f32, 0f32, 0f32],
     };
+
+    /// The effective cell colour under full daytime shadow intensity.
+    ///
+    /// Mirrors `CellLightDef.updateShadow(1.0)` followed by the
+    /// `ClampShadowLitModifier` (floor `0.3`) and `ClampLightLitModifier`
+    /// (ceiling `1.05`) modifiers that the reference light manager always
+    /// installs. `ambiance_light` is already stored doubled, matching the
+    /// `COLOR_FACTOR` applied in `CellLightDef`.
+    pub fn effective_day_color(&self) -> [f32; 3] {
+        let mut rgb = self.ambiance_light;
+        if self.has_shadows {
+            for (channel, shadow) in rgb.iter_mut().zip(self.shadows) {
+                *channel = (*channel * shadow * 2.0).clamp(0.0, 2.0);
+            }
+        }
+        for channel in &mut rgb {
+            *channel = channel.clamp(0.3, 1.05);
+        }
+        rgb
+    }
 }
 
 #[derive(Clone)]
@@ -46,7 +64,7 @@ impl<'a> TryRead<'a, LittleEndian> for LightCell {
         let y = bytes.read::<i16>(offset, ctx)?;
 
         let defcount = bytes.read::<u16>(offset, ctx)?;
-        let mut layer: Vec<Arc<LightDef>> = Vec::with_capacity(18 * 18);
+        let mut layer: Vec<Arc<LightDef>> = Vec::with_capacity(defcount as usize);
 
         for _ in 0..defcount {
             let outdoor = bytes.read::<u8>(offset, ctx)? != 0;
@@ -107,7 +125,7 @@ impl<'a> TryRead<'a, LittleEndian> for LightCell {
 
 #[derive(Default)]
 pub struct LightMap {
-    pub light_maps: HashMap<i32, LightCell>,
+    pub light_maps: HashMap<(i32, i32), LightCell>,
 }
 
 impl LightMap {
@@ -152,8 +170,12 @@ impl LightMap {
     }
 }
 
-pub fn chunk_key(x: i32, y: i32) -> i32 {
-    x << 16 | (y & 0xFFFF)
+/// Returns the key identifying the 18x18 light chunk containing `(x, y)`.
+///
+/// A `(i32, i32)` pair is used instead of packing into a single `i32`, which
+/// truncated coordinates outside `i16` and made distant chunks collide.
+pub fn chunk_key(x: i32, y: i32) -> (i32, i32) {
+    (x, y)
 }
 
 #[cfg(test)]
@@ -161,16 +183,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_chunk_key_and_coordinates() {
-        assert_eq!(chunk_key(0, 0), 0);
-        assert_eq!(chunk_key(1, 2), (1 << 16) | 2);
-        assert_eq!(chunk_key(-1, -1), (-1i32 << 16) | 0xFFFF);
-
+    fn get_color_falls_back_to_default() {
         let map = LightMap::default();
         let default_color = map.get_color(10, 20, 0);
         assert_eq!(
             default_color.ambiance_light,
             LightDef::DEFAULT.ambiance_light
         );
+    }
+
+    #[test]
+    fn distant_chunks_do_not_collide() {
+        let make_cell = |chunk_x: i32, color: f32| {
+            let cell_x = chunk_x * 18;
+            let mut layer_colors = HashMap::new();
+            layer_colors.insert(
+                0,
+                Arc::new(LightDef {
+                    ambiance_light: [color; 3],
+                    ..LightDef::DEFAULT
+                }),
+            );
+            LightCell {
+                cell_x,
+                cell_y: 0,
+                layer_colors,
+            }
+        };
+
+        let mut light_maps = HashMap::new();
+        for (chunk_x, color) in [(0, 0.25), (65536, 0.75)] {
+            let cell = make_cell(chunk_x, color);
+            light_maps.insert(chunk_key(cell.cell_x / 18, cell.cell_y / 18), cell);
+        }
+        let map = LightMap { light_maps };
+
+        assert_eq!(map.get_color(0, 0, 0).ambiance_light, [0.25; 3]);
+        assert_eq!(map.get_color(65536 * 18, 0, 0).ambiance_light, [0.75; 3]);
     }
 }
