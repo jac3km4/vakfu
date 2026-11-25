@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use bevy::camera::visibility::RenderLayers;
@@ -14,8 +15,8 @@ use rstar::RTreeObject;
 use crate::assets::{Animation, iso_cell_diamond, iso_to_screen, screen_to_iso};
 use crate::camera::{CameraController, MainCamera, OVERLAY_LAYER, is_pointer_over_ui};
 use crate::render::{
-    ChangeMapEvent, MapCatalog, MapRenderer, Renderable, RenderableSpec, atlas_layout_parts,
-    premultiplied_tint,
+    ChangeMapEvent, MapCatalog, MapRenderer, MapSprite, Renderable, RenderableSpec,
+    atlas_layout_parts, premultiplied_tint,
 };
 use crate::settings::MapViewSettings;
 
@@ -169,6 +170,8 @@ struct DragState {
     uid: u64,
     before: Renderable,
     cell_offset: (i32, i32),
+    /// Cell the element is being dragged over. Committed to the R* tree on release.
+    current_cell: (i32, i32),
 }
 
 #[derive(Resource)]
@@ -359,14 +362,13 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                 change_map.write(ChangeMapEvent(catalog.available_maps[idx - 1]));
             }
 
-            let mut map_search = editor.map_search.clone();
             egui::ComboBox::from_id_salt("editor_map_selector")
                 .selected_text(catalog.current_map_id.to_string())
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("🔍");
-                        ui.text_edit_singleline(&mut map_search);
+                        ui.text_edit_singleline(&mut editor.map_search);
                     });
                     ui.separator();
                     egui::ScrollArea::vertical()
@@ -374,7 +376,9 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                         .show(ui, |ui| {
                             for &map_id in &catalog.available_maps {
                                 let map_str = map_id.to_string();
-                                if !map_search.is_empty() && !map_str.contains(&map_search) {
+                                if !editor.map_search.is_empty()
+                                    && !map_str.contains(&editor.map_search)
+                                {
                                     continue;
                                 }
                                 let is_selected = catalog.current_map_id == map_id;
@@ -384,7 +388,6 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                             }
                         });
                 });
-            editor.map_search = map_search;
 
             let has_next = current_idx.is_some_and(|idx| idx + 1 < catalog.available_maps.len());
             if ui.add_enabled(has_next, egui::Button::new("▶")).clicked()
@@ -495,10 +498,10 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             editor.palette_page = editor.palette_page.min(total_pages - 1);
             let start = editor.palette_page * PALETTE_PAGE_SIZE;
             let end = (start + PALETTE_PAGE_SIZE).min(total_sprites);
-            let page_ids: Vec<i32> = if editor.palette_only_used {
-                renderer.used_definitions()[start..end].to_vec()
+            let page_ids: Cow<'_, [i32]> = if editor.palette_only_used {
+                Cow::Borrowed(&renderer.used_definitions()[start..end])
             } else {
-                editor.sorted_sprite_ids[start..end].to_vec()
+                Cow::Owned(editor.sorted_sprite_ids[start..end].to_vec())
             };
 
             ui.horizontal(|ui| {
@@ -935,6 +938,7 @@ pub struct EditorInputParams<'w, 's> {
     settings: Res<'w, MapViewSettings>,
     renderer: ResMut<'w, MapRenderer>,
     editor: ResMut<'w, EditorState>,
+    sprites: Query<'w, 's, &'static mut Transform, (With<MapSprite>, Without<MainCamera>)>,
 }
 
 pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
@@ -951,6 +955,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
         settings,
         mut renderer,
         mut editor,
+        mut sprites,
     } = params;
     let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
     let canvas_rect = camera_controller.canvas_rect;
@@ -1114,6 +1119,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                             editor.drag_state = Some(DragState {
                                 uid: picked.uid,
                                 cell_offset: (picked.cell_x - hover.0, picked.cell_y - hover.1),
+                                current_cell: (picked.cell_x, picked.cell_y),
                                 before: picked,
                             });
                         } else {
@@ -1155,9 +1161,13 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
             }
             ButtonState::Released => {
                 if let Some(drag) = editor.drag_state.take()
-                    && let Some(after) = renderer.get_element(drag.uid).cloned()
-                    && (after.cell_x != drag.before.cell_x || after.cell_y != drag.before.cell_y)
+                    && drag.current_cell != (drag.before.cell_x, drag.before.cell_y)
+                    && let Some(mut after) = renderer.get_element(drag.uid).cloned()
                 {
+                    after.cell_x = drag.current_cell.0;
+                    after.cell_y = drag.current_cell.1;
+                    after.recompute_position(&mut renderer);
+                    renderer.update_element(after.clone());
                     editor.history.push(EditAction::Replace {
                         before: drag.before,
                         after,
@@ -1170,21 +1180,29 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
         }
     }
 
-    // Continuous drag updates
+    // Continuous drag updates: move the live sprite immediately and only
+    // commit the new cell to the R* tree when the drag is released.
     if !is_over_egui && !space {
-        if let Some(drag) = &editor.drag_state
-            && let Some(world_pos) = editor.hovered_world
+        let hovered_world = editor.hovered_world;
+        if let Some(drag) = &mut editor.drag_state
+            && let Some(world_pos) = hovered_world
         {
             let hover = screen_to_iso(world_pos.x, world_pos.y, i32::from(drag.before.cell_z));
             let target_x = hover.0 + drag.cell_offset.0;
             let target_y = hover.1 + drag.cell_offset.1;
-            if let Some(mut current) = renderer.get_element(drag.uid).cloned()
-                && (current.cell_x != target_x || current.cell_y != target_y)
-            {
-                current.cell_x = target_x;
-                current.cell_y = target_y;
-                current.recompute_position(&mut renderer);
-                renderer.update_element(current);
+            if drag.current_cell != (target_x, target_y) {
+                drag.current_cell = (target_x, target_y);
+                if let Some(entity) = drag.before.id
+                    && let Ok(mut transform) = sprites.get_mut(entity)
+                {
+                    let (sx, sy) = iso_to_screen(
+                        target_x,
+                        target_y,
+                        i32::from(drag.before.cell_z) - i32::from(drag.before.height),
+                    );
+                    transform.translation.x = sx - f32::from(drag.before.origin.0);
+                    transform.translation.y = sy + f32::from(drag.before.origin.1);
+                }
             }
         } else if editor.painting_active
             && let Some(cell) = editor.hovered_cell
@@ -1500,8 +1518,28 @@ pub fn editor_overlay_system(
     if let Some(uid) = editor.selected_uid
         && let Some(elem) = renderer.get_element(uid)
     {
-        let x = elem.position.x;
-        let y = elem.position.y;
+        // During a drag the R* tree still holds the pre-drag position; follow
+        // the preview cell so the outline moves with the sprite.
+        let dragging = editor
+            .drag_state
+            .as_ref()
+            .filter(|drag| drag.uid == elem.uid);
+        let (cell_x, cell_y) = dragging
+            .map(|drag| drag.current_cell)
+            .unwrap_or((elem.cell_x, elem.cell_y));
+        let (x, y) = if dragging.is_some() {
+            let (sx, sy) = iso_to_screen(
+                cell_x,
+                cell_y,
+                i32::from(elem.cell_z) - i32::from(elem.height),
+            );
+            (
+                sx - f32::from(elem.origin.0),
+                sy + f32::from(elem.origin.1),
+            )
+        } else {
+            (elem.position.x, elem.position.y)
+        };
         let w = elem.render_size.x as f32;
         let h = elem.render_size.y as f32;
         let highlight = Color::srgba(1.0, 0.85, 0.2, 0.95);
@@ -1521,7 +1559,7 @@ pub fn editor_overlay_system(
             });
         }
 
-        let base_diamond = iso_cell_diamond(elem.cell_x, elem.cell_y, i32::from(elem.cell_z));
+        let base_diamond = iso_cell_diamond(cell_x, cell_y, i32::from(elem.cell_z));
         push_diamond(
             &mut lines,
             base_diamond,
