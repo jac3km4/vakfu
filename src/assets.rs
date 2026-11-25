@@ -23,6 +23,14 @@ pub use sprite::{Animation, Frames, MapSpriteDefinition, MapSpriteLibrary};
 pub use tgam::{Tgam, round_up_to_power_of_two};
 use thiserror::Error;
 
+/// Returns whether a zip entry name refers to a map or light chunk.
+///
+/// Chunk entries are named after their cell coordinates, e.g. `12-34_`;
+/// trimming the numeric coordinates leaves the trailing underscore.
+pub(crate) fn is_chunk_entry_name(name: &str) -> bool {
+    name.trim_matches(|c: char| c.is_numeric() || c == '-') == "_"
+}
+
 #[derive(Debug, Default, bevy::reflect::TypePath)]
 pub struct TgamLoader;
 
@@ -246,6 +254,14 @@ mod tests {
             reader.read_to_end(&mut bytes).await?;
             Ok(bytes)
         })
+    }
+
+    #[test]
+    fn recognises_chunk_entry_names() {
+        assert!(is_chunk_entry_name("12-34_"));
+        assert!(is_chunk_entry_name("_"));
+        assert!(!is_chunk_entry_name("12-34_data"));
+        assert!(!is_chunk_entry_name("gfx/1.tgam"));
     }
 
     #[test]

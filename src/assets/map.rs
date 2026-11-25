@@ -3,7 +3,7 @@ use std::io::{Read, Seek};
 use byte::ctx::{Endianess, LittleEndian};
 use byte::{BytesExt, TryRead};
 
-use super::AssetError;
+use super::{AssetError, is_chunk_entry_name};
 use crate::util::{WithSize, WithSizePrefix};
 
 const CELL_WIDTH: i32 = 86;
@@ -25,11 +25,8 @@ impl Map {
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
-            if file
-                .name()?
-                .trim_matches(|c| char::is_numeric(c) || c == '-')
-                == "_"
-            {
+            let name = file.name()?;
+            if is_chunk_entry_name(&name) {
                 let mut buffer = Vec::with_capacity(file.size() as usize);
                 file.read_to_end(&mut buffer)?;
 

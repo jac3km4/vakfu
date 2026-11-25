@@ -5,7 +5,7 @@ use byte::ctx::LittleEndian;
 use byte::{BytesExt, TryRead};
 use hashbrown::HashMap;
 
-use crate::assets::AssetError;
+use crate::assets::{AssetError, is_chunk_entry_name};
 
 pub struct LightDef {
     pub ambiance_light: [f32; 3],
@@ -135,11 +135,8 @@ impl LightMap {
 
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i)?;
-            if entry
-                .name()?
-                .trim_matches(|c| char::is_numeric(c) || c == '-')
-                == "_"
-            {
+            let name = entry.name()?;
+            if is_chunk_entry_name(&name) {
                 let mut buffer = Vec::with_capacity(entry.size() as usize);
                 entry.read_to_end(&mut buffer)?;
 

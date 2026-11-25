@@ -6,7 +6,7 @@
 //! `Rgba8Unorm`; the built-in shaders and tint behavior are unchanged.
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use bevy::core_pipeline::core_2d::Transparent2d;
 use bevy::prelude::*;
