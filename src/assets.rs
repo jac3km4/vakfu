@@ -14,7 +14,7 @@ use bevy::image::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
-pub use light::LightMap;
+pub use light::{LightDef, LightMap, LightingState, PointLight2d};
 pub use map::{
     Map, MapChunk, MapElementDetails, Rgba, TINT_SCALE, element_hashcode, iso_cell_diamond,
     iso_to_screen, screen_to_iso, sorted_altitude_order,

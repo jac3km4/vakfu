@@ -14,8 +14,9 @@ use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
-    Animation, Frames, LightMap, Map, MapChunk, MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE,
-    element_hashcode, iso_to_screen, round_up_to_power_of_two, sorted_altitude_order,
+    Animation, Frames, LightDef, LightMap, LightingState, Map, MapChunk, MapSpriteDefinition,
+    MapSpriteLibrary, TINT_SCALE, element_hashcode, iso_to_screen, round_up_to_power_of_two,
+    sorted_altitude_order,
 };
 use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
@@ -93,6 +94,9 @@ pub struct MapRenderer {
     available_layers: Vec<u8>,
     /// Altitude-order counts per cell, for exact placement lookup.
     cell_altitudes: HashMap<(i32, i32), BTreeMap<u8, u32>>,
+    /// Static light data, kept so edited/moved elements can resolve their cell
+    /// lighting like the reference engine does.
+    light_map: LightMap,
 }
 
 /// The definition-independent inputs for placing a sprite.
@@ -110,7 +114,7 @@ pub struct RenderableSpec<'a> {
 }
 
 impl MapRenderer {
-    pub fn new(map: &Map, sprites: &MapSpriteLibrary, light_map: &LightMap) -> Self {
+    pub fn new(map: &Map, sprites: &MapSpriteLibrary, light_map: LightMap) -> Self {
         let mut elements = map
             .chunks()
             .iter()
@@ -200,6 +204,7 @@ impl MapRenderer {
                     render_size: UVec2::new(display_width.into(), display_height.into()),
                     color,
                     color_tinted,
+                    light: *light_def,
                     texture_id: def.texture_id(),
                     flip_x: def.flags().is_flip(),
                     animation: def.animation(),
@@ -245,6 +250,7 @@ impl MapRenderer {
             used_definitions,
             available_layers,
             cell_altitudes,
+            light_map,
         }
     }
 
@@ -494,6 +500,14 @@ impl MapRenderer {
             (x + f32::from(display_width), y - f32::from(display_height)),
         );
         let z = self.place_z(envelope, hashcode, None);
+        let light = *self.light_map.get_color(cell_x, cell_y, layer as i32);
+        let [lr, lg, lb] = LightingState::default().shade(&light);
+        let color_tinted = LinearRgba::new(
+            color.red * lr,
+            color.green * lg,
+            color.blue * lb,
+            color.alpha,
+        );
 
         Renderable {
             uid,
@@ -510,7 +524,8 @@ impl MapRenderer {
             texture_size: UVec2::new(sample_width.into(), sample_height.into()),
             render_size: UVec2::new(display_width.into(), display_height.into()),
             color,
-            color_tinted: color,
+            color_tinted,
+            light,
             texture_id: def.texture_id(),
             flip_x: def.flags().is_flip(),
             animation: def.animation(),
@@ -661,6 +676,8 @@ pub struct Renderable {
     pub render_size: UVec2,
     pub color: LinearRgba,
     pub color_tinted: LinearRgba,
+    /// Static light definition for this element's cell and layer.
+    pub light: LightDef,
     pub texture_id: i32,
     pub flip_x: bool,
     pub animation: Animation,
@@ -692,6 +709,21 @@ impl Renderable {
             sorted_altitude_order(self.altitude_order, self.before_mobile),
         );
         self.position.z = renderer.place_z(self.envelope(), self.hashcode, Some(self.uid));
+        // Moving an element can change its cell, so refresh the static light.
+        self.light = *renderer
+            .light_map
+            .get_color(self.cell_x, self.cell_y, self.layer as i32);
+    }
+
+    /// Recomputes the cached lit colour from `color` and the current lighting.
+    pub fn retint(&mut self, lighting: &LightingState) {
+        let [r, g, b] = lighting.shade_at(&self.light, self.cell_x as f32, self.cell_y as f32);
+        self.color_tinted = LinearRgba::new(
+            self.color.red * r,
+            self.color.green * g,
+            self.color.blue * b,
+            self.color.alpha,
+        );
     }
 }
 
@@ -748,7 +780,7 @@ pub fn load_renderer(
         LightMap::default()
     };
 
-    Ok(MapRenderer::new(&map, sprites, &light_map))
+    Ok(MapRenderer::new(&map, sprites, light_map))
 }
 
 pub fn load_map_system(
@@ -926,6 +958,25 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     mem::swap(visible, seen);
 
     Ok(())
+}
+
+/// Recomputes cached lit colours when the time-of-day lighting changes.
+///
+/// `rendering_system` re-syncs visible sprites whenever [`MapRenderer`] is
+/// changed, so updating the cached colours here is enough to refresh the view.
+pub fn lighting_system(
+    settings: Res<'_, MapViewSettings>,
+    mut render_state: ResMut<'_, MapRenderer>,
+    mut last: Local<'_, Option<LightingState>>,
+) {
+    if last.as_ref() == Some(&settings.lighting) {
+        return;
+    }
+    let lighting = settings.lighting.clone();
+    for elem in &mut render_state.rtree {
+        elem.retint(&lighting);
+    }
+    *last = Some(lighting);
 }
 
 pub fn animation_system(
@@ -1180,6 +1231,7 @@ mod tests {
             render_size: UVec2::splat(10),
             color: LinearRgba::WHITE,
             color_tinted: LinearRgba::WHITE,
+            light: LightDef::DEFAULT,
             texture_id: 1,
             flip_x: false,
             animation: Animation::None,
@@ -1205,6 +1257,7 @@ mod tests {
             used_definitions: Vec::new(),
             available_layers: Vec::new(),
             cell_altitudes: HashMap::new(),
+            light_map: LightMap::default(),
         }
     }
 
@@ -1239,6 +1292,7 @@ mod tests {
                 used_definitions: Vec::new(),
                 available_layers: Vec::new(),
                 cell_altitudes: HashMap::new(),
+            light_map: LightMap::default(),
             })
             .insert_resource(CameraController::default())
             .insert_resource(PendingMapLoad {
@@ -1419,6 +1473,7 @@ mod tests {
             render_size: UVec2::new(20, 20),
             color: LinearRgba::WHITE,
             color_tinted: LinearRgba::WHITE,
+            light: LightDef::DEFAULT,
             texture_id: 1,
             flip_x: false,
             animation: Animation::None,
@@ -1444,6 +1499,7 @@ mod tests {
             render_size: UVec2::new(20, 20),
             color: LinearRgba::WHITE,
             color_tinted: LinearRgba::WHITE,
+            light: LightDef::DEFAULT,
             texture_id: 2,
             flip_x: false,
             animation: Animation::None,
@@ -1464,6 +1520,7 @@ mod tests {
             used_definitions: vec![10, 99],
             available_layers: vec![0],
             cell_altitudes: HashMap::new(),
+            light_map: LightMap::default(),
         };
         renderer.uid_envelopes.insert(1, elem_top_z.envelope());
         renderer.uid_envelopes.insert(2, elem_solid.envelope());
@@ -1493,6 +1550,7 @@ mod tests {
             used_definitions: Vec::new(),
             available_layers: Vec::new(),
             cell_altitudes: HashMap::new(),
+            light_map: LightMap::default(),
         };
         assert_eq!(renderer.next_altitude_order_at(1, 2), 0);
 

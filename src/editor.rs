@@ -12,7 +12,7 @@ use bevy_egui::{EguiContexts, EguiTextureHandle, PrimaryEguiContext};
 use hashbrown::HashMap;
 use rstar::RTreeObject;
 
-use crate::assets::{Animation, iso_cell_diamond, iso_to_screen, screen_to_iso};
+use crate::assets::{Animation, LightingState, iso_cell_diamond, iso_to_screen, screen_to_iso};
 use crate::camera::{CameraController, MainCamera, OVERLAY_LAYER, is_pointer_over_ui};
 use crate::render::{
     ChangeMapEvent, MapCatalog, MapRenderer, MapSprite, Renderable, RenderableSpec,
@@ -399,6 +399,26 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             ui.separator();
             ui.checkbox(&mut editor.show_grid, "Grid");
             ui.checkbox(&mut edited_settings.enable_light, "Light");
+            ui.menu_button("☀", |ui| {
+                ui.add(
+                    egui::Slider::new(
+                        &mut edited_settings.lighting.shadow_intensity,
+                        0.0..=1.0,
+                    )
+                    .text("Shadows"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut edited_settings.lighting.night_light_intensity,
+                        0.0..=1.0,
+                    )
+                    .text("Night lights"),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Sun colour");
+                    ui.color_edit_button_rgb(&mut edited_settings.lighting.sun_color);
+                });
+            });
             if ui.button("Center").clicked() {
                 reset_cam_clicked = true;
             }
@@ -772,7 +792,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                         let response = ui.color_edit_button_rgba_unmultiplied(&mut rgba);
                         if response.changed() {
                             edited.color = LinearRgba::new(rgba[0], rgba[1], rgba[2], rgba[3]);
-                            edited.color_tinted = edited.color;
+                            edited.retint(&settings.lighting);
                             changed = true;
                         }
                         edit_started |= response.drag_started() || response.gained_focus();
@@ -795,6 +815,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                 }
                 if changed {
                     edited.recompute_position(&mut renderer);
+                    edited.retint(&settings.lighting);
                     renderer.update_element(edited.clone());
                     // Edits that never opened a drag/focus session (such as a
                     // colour popup) are recorded immediately; a tracked session
@@ -911,7 +932,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
         editor.history.push(EditAction::Replace { before, after });
     }
     if duplicate_clicked && let Some(uid) = editor.selected_uid {
-        duplicate_selected(&mut editor, &mut renderer, uid);
+        duplicate_selected(&mut editor, &mut renderer, uid, &settings.lighting);
     }
     if delete_clicked && let Some(uid) = editor.selected_uid {
         if let Some(removed) = renderer.remove_element(uid) {
@@ -1015,7 +1036,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
             && keys.just_pressed(KeyCode::KeyD)
             && let Some(uid) = editor.selected_uid
         {
-            duplicate_selected(&mut editor, &mut renderer, uid);
+            duplicate_selected(&mut editor, &mut renderer, uid, &settings.lighting);
         } else if !ctrl {
             if keys.just_pressed(KeyCode::KeyV) {
                 editor.tool = EditorTool::Select;
@@ -1042,6 +1063,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                     let mut after = before.clone();
                     after.cell_z = after.cell_z.saturating_add(z_delta);
                     after.recompute_position(&mut renderer);
+                    after.retint(&settings.lighting);
                     renderer.update_element(after.clone());
                     editor.history.push(EditAction::Replace { before, after });
                 } else {
@@ -1167,6 +1189,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                     after.cell_x = drag.current_cell.0;
                     after.cell_y = drag.current_cell.1;
                     after.recompute_position(&mut renderer);
+                    after.retint(&settings.lighting);
                     renderer.update_element(after.clone());
                     editor.history.push(EditAction::Replace {
                         before: drag.before,
@@ -1299,7 +1322,12 @@ impl PlacementContext<'_> {
     }
 }
 
-fn duplicate_selected(editor: &mut EditorState, renderer: &mut MapRenderer, uid: u64) {
+fn duplicate_selected(
+    editor: &mut EditorState,
+    renderer: &mut MapRenderer,
+    uid: u64,
+    lighting: &LightingState,
+) {
     let Some(mut dup) = renderer.get_element(uid).cloned() else {
         return;
     };
@@ -1307,6 +1335,7 @@ fn duplicate_selected(editor: &mut EditorState, renderer: &mut MapRenderer, uid:
     dup.cell_x += 1;
     dup.id = None;
     dup.recompute_position(renderer);
+    dup.retint(lighting);
     editor.selected_uid = Some(dup.uid);
     renderer.insert_element(dup.clone());
     editor.history.push(EditAction::Place(dup));
@@ -1638,7 +1667,7 @@ mod tests {
     use byte::ctx::LittleEndian;
 
     use super::*;
-    use crate::assets::{LightMap, Map, MapSpriteLibrary, iso_to_screen};
+    use crate::assets::{LightDef, LightMap, Map, MapSpriteLibrary, iso_to_screen};
 
     #[test]
     fn screen_to_iso_roundtrips_iso_to_screen() {
@@ -1661,7 +1690,7 @@ mod tests {
             buf
         };
         let map = Map::load(empty_zip).unwrap();
-        let mut renderer = MapRenderer::new(&map, &sprites, &LightMap::default());
+        let mut renderer = MapRenderer::new(&map, &sprites, LightMap::default());
         let mut history = EditorHistory::default();
 
         let mut initial = Renderable {
@@ -1680,6 +1709,7 @@ mod tests {
             render_size: UVec2::new(32, 32),
             color: LinearRgba::WHITE,
             color_tinted: LinearRgba::WHITE,
+            light: LightDef::DEFAULT,
             texture_id: 1,
             flip_x: false,
             animation: Animation::None,

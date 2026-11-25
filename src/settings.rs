@@ -4,6 +4,7 @@ use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Local, Res, ResMut};
 use bevy_egui::{EguiContexts, egui};
 
+use crate::assets::LightingState;
 use crate::render::{ChangeMapEvent, MapCatalog};
 
 #[derive(Debug, Clone, PartialEq, Resource)]
@@ -13,6 +14,7 @@ pub struct MapViewSettings {
     pub group_filter_on: bool,
     pub group: i32,
     pub enable_light: bool,
+    pub lighting: LightingState,
 }
 
 impl Default for MapViewSettings {
@@ -23,6 +25,7 @@ impl Default for MapViewSettings {
             group_filter_on: false,
             group: 0,
             enable_light: true,
+            lighting: LightingState::default(),
         }
     }
 }
@@ -106,6 +109,26 @@ pub fn settings_ui_system(
                 );
             });
             ui.checkbox(&mut edited_settings.enable_light, "Enable light");
+            ui.add_enabled_ui(edited_settings.enable_light, |ui| {
+                ui.add(
+                    egui::Slider::new(
+                        &mut edited_settings.lighting.shadow_intensity,
+                        0.0..=1.0,
+                    )
+                    .text("Shadows"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut edited_settings.lighting.night_light_intensity,
+                        0.0..=1.0,
+                    )
+                    .text("Night lights"),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Sun colour");
+                    ui.color_edit_button_rgb(&mut edited_settings.lighting.sun_color);
+                });
+            });
         });
     settings.set_if_neq(edited_settings);
     Ok(())

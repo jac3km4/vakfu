@@ -7,16 +7,24 @@ use hashbrown::HashMap;
 
 use crate::assets::{AssetError, is_chunk_entry_name};
 
+/// The lower colour bound applied by `ClampShadowLitModifier`.
+const SHADOW_MIN: f32 = 0.3;
+/// The upper colour bound applied by `ClampLightLitModifier`.
+const LIGHT_MAX: f32 = 1.05;
+
+/// The per-cell static lighting definition, mirroring `CellLightDef`.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LightDef {
+    /// Ambient light, already doubled (`COLOR_FACTOR = 2.0`).
     pub ambiance_light: [f32; 3],
+    /// Per-channel shadow multipliers.
     pub shadows: [f32; 3],
-    #[allow(dead_code)]
+    /// Night-light colour offset (`byte / 255 - 0.5`).
     pub lights: [f32; 3],
-    #[allow(dead_code)]
     pub allow_outdoor_lighting: bool,
     pub has_shadows: bool,
-    #[allow(dead_code)]
-    pub night_light: [f32; 3],
+    /// Whether the cell defines a night light (its `lights` colour is not gray).
+    pub has_night_light: bool,
 }
 
 impl LightDef {
@@ -24,33 +32,185 @@ impl LightDef {
         allow_outdoor_lighting: false,
         ambiance_light: [1f32, 1f32, 1f32],
         shadows: [1f32, 1f32, 1f32],
-        lights: [1f32, 1f32, 1f32],
+        lights: [0f32, 0f32, 0f32],
         has_shadows: false,
-        night_light: [0f32, 0f32, 0f32],
+        has_night_light: false,
     };
 
-    /// The effective cell colour under full daytime shadow intensity.
+    /// The ambient colour after `CellLightDef.updateShadow(shadow_intensity)`.
     ///
-    /// Mirrors `CellLightDef.updateShadow(1.0)` followed by the
-    /// `ClampShadowLitModifier` (floor `0.3`) and `ClampLightLitModifier`
-    /// (ceiling `1.05`) modifiers that the reference light manager always
-    /// installs. `ambiance_light` is already stored doubled, matching the
-    /// `COLOR_FACTOR` applied in `CellLightDef`.
-    pub fn effective_day_color(&self) -> [f32; 3] {
+    /// `shadow_intensity` is the reference `m_shadowIntensityFactor` in
+    /// `[0, 1]`: `1.0` is full daytime shadows and `0.0` disables them.
+    pub fn merged_color(&self, shadow_intensity: f32) -> [f32; 3] {
         let mut rgb = self.ambiance_light;
-        if self.has_shadows {
+        if shadow_intensity > 0.0 && self.has_shadows {
+            let k = shadow_intensity * 2.0;
+            let l = 1.0 - shadow_intensity;
             for (channel, shadow) in rgb.iter_mut().zip(self.shadows) {
-                *channel = (*channel * shadow * 2.0).clamp(0.0, 2.0);
+                *channel = (*channel * (shadow * k + l)).clamp(0.0, 2.0);
             }
-        }
-        for channel in &mut rgb {
-            *channel = channel.clamp(0.3, 1.05);
         }
         rgb
     }
+
+    /// The additive night-light colour after
+    /// `CellLightDef.updateNightLight(night_light_intensity)`.
+    pub fn night_light_color(&self, night_light_intensity: f32) -> [f32; 3] {
+        if !self.has_night_light || night_light_intensity <= 0.0 {
+            return [0.0; 3];
+        }
+        let k = night_light_intensity * 2.0;
+        [
+            self.lights[0] * k,
+            self.lights[1] * k,
+            self.lights[2] * k,
+        ]
+    }
+
+    /// The effective cell colour under full daytime shadow intensity.
+    pub fn effective_day_color(&self) -> [f32; 3] {
+        LightingState::default().shade(self)
+    }
 }
 
-#[derive(Clone)]
+/// Time-of-day lighting, mirroring the factors held by
+/// `IsoSceneLightManager` and `SunLightModifier`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LightingState {
+    /// `m_shadowIntensityFactor`; `1.0` is full daytime shadows.
+    pub shadow_intensity: f32,
+    /// `m_nightLightIntensityFactor`; `1.0` is full night lights.
+    pub night_light_intensity: f32,
+    /// `SunLightModifier` colour, applied to outdoor-lit cells.
+    pub sun_color: [f32; 3],
+    /// Dynamic additive point lights (normally empty for static maps).
+    pub point_lights: Vec<PointLight2d>,
+}
+
+impl Default for LightingState {
+    fn default() -> Self {
+        Self {
+            shadow_intensity: 1.0,
+            night_light_intensity: 0.0,
+            sun_color: [1.0; 3],
+            point_lights: Vec::new(),
+        }
+    }
+}
+
+impl LightingState {
+    /// Computes the lit colour of a static cell, mirroring the modifier order
+    /// installed by `IsoSceneLightManager.reset`:
+    ///
+    /// 1. `SunLightModifier` (priority 0) multiplies outdoor-lit cells.
+    /// 2. `ClampShadowLitModifier` (300) floors the running colour at 0.3.
+    /// 3. `LightningMapManager` (400) multiplies by the merged cell colour and
+    ///    adds the night light.
+    /// 4. `IsoLightSourceModifier` (600) adds dynamic light contributions.
+    /// 5. `ClampLightLitModifier` (800) caps the result at 1.05.
+    pub fn shade(&self, def: &LightDef) -> [f32; 3] {
+        self.shade_at(def, 0.0, 0.0)
+    }
+
+    /// Like [`Self::shade`], but evaluates the dynamic point lights at the
+    /// given cell position.
+    pub fn shade_at(&self, def: &LightDef, cell_x: f32, cell_y: f32) -> [f32; 3] {
+        let mut color = [1.0; 3];
+        if def.allow_outdoor_lighting {
+            for (channel, sun) in color.iter_mut().zip(self.sun_color) {
+                *channel *= sun;
+            }
+        }
+        // ClampShadowLitModifier (priority 300).
+        for channel in &mut color {
+            *channel = channel.max(SHADOW_MIN);
+        }
+        // LightningMapManager (priority 400): multiplicative cell colour plus
+        // the additive night light.
+        let merged = def.merged_color(self.shadow_intensity);
+        let night = def.night_light_color(self.night_light_intensity);
+        for channel in 0..3 {
+            color[channel] = color[channel] * merged[channel] + night[channel];
+        }
+        // IsoLightSourceModifier (priority 600).
+        for light in &self.point_lights {
+            let contribution = light.contribution_at(cell_x, cell_y);
+            for channel in 0..3 {
+                color[channel] += contribution[channel];
+            }
+        }
+        // ClampLightLitModifier (priority 800). The reference only caps the
+        // ceiling there; the floor also keeps sprite tints non-negative.
+        for channel in &mut color {
+            *channel = channel.clamp(SHADOW_MIN, LIGHT_MAX);
+        }
+        color
+    }
+}
+
+/// A dynamic isometric point light, mirroring `IsoLightSource`.
+///
+/// The reference samples a small 2D intensity map at cell centres:
+/// `max(0, 1 - distance / range)`, scaled by `intensity` and the light colour.
+/// Contributions are additive and applied before the `1.05` ceiling.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointLight2d {
+    /// Cell-space position `(x, y)` of the light.
+    pub position: [f32; 2],
+    /// Maximum radius, in cells.
+    pub range: f32,
+    /// Linear falloff coefficient (`m_attenuation[1]`, `1.0` by default).
+    pub attenuation: f32,
+    /// Multiplier applied to the falloff.
+    pub intensity: f32,
+    /// Colour added to a fully lit cell.
+    pub color: [f32; 3],
+}
+
+impl Default for PointLight2d {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 2],
+            range: 3.0,
+            attenuation: 1.0,
+            intensity: 1.0,
+            color: [1.0; 3],
+        }
+    }
+}
+
+impl PointLight2d {
+    /// Returns this light's additive contribution at a cell.
+    pub fn contribution_at(&self, cell_x: f32, cell_y: f32) -> [f32; 3] {
+        if self.range <= 0.0 || self.intensity == 0.0 {
+            return [0.0; 3];
+        }
+        let dx = cell_x - self.position[0];
+        let dy = cell_y - self.position[1];
+        let distance = (dx * dx + dy * dy).sqrt();
+        if distance > self.range {
+            return [0.0; 3];
+        }
+        // `LightSource` default attenuation is `{0, 1, 0}`, i.e.
+        // `1 / (attenuation * range)`.
+        let falloff = self.attenuation * self.range;
+        let strength = if falloff > 0.0 {
+            (1.0 - distance / falloff).max(0.0)
+        } else if distance == 0.0 {
+            1.0
+        } else {
+            0.0
+        } * self.intensity;
+        [
+            self.color[0] * strength,
+            self.color[1] * strength,
+            self.color[2] * strength,
+        ]
+    }
+}
+
+
+#[derive(Debug, Clone)]
 pub struct LightCell {
     pub cell_x: i32,
     pub cell_y: i32,
@@ -71,7 +231,6 @@ impl<'a> TryRead<'a, LittleEndian> for LightCell {
             let ambiance = bytes.read::<i32>(offset, ctx)?;
             let shadow = bytes.read::<i32>(offset, ctx)?;
             let light = bytes.read::<i32>(offset, ctx)?;
-            let night = [0f32, 0f32, 0f32];
 
             let def = LightDef {
                 allow_outdoor_lighting: outdoor,
@@ -91,7 +250,7 @@ impl<'a> TryRead<'a, LittleEndian> for LightCell {
                     (light >> 16 & 0xFF) as f32 / 255f32 - 0.5f32,
                 ],
                 has_shadows: shadow as u32 != 0xFF80_8080,
-                night_light: night,
+                has_night_light: light as u32 != 0xFF80_8080,
             };
             layer.push(Arc::new(def));
         }
@@ -123,7 +282,7 @@ impl<'a> TryRead<'a, LittleEndian> for LightCell {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct LightMap {
     pub light_maps: HashMap<(i32, i32), LightCell>,
 }
@@ -211,7 +370,7 @@ mod tests {
         assert_eq!(def.shadows, [128.0 / 255.0; 3]);
         assert_eq!(def.lights, [0.5, -0.5, -0.5]);
         assert!(def.has_shadows);
-        assert_eq!(def.night_light, [0.0, 0.0, 0.0]);
+        assert!(def.has_night_light);
     }
 
     #[test]
@@ -269,6 +428,128 @@ mod tests {
             ..LightDef::DEFAULT
         };
         assert_eq!(bright.effective_day_color(), [1.05, 0.3, 1.05]);
+    }
+
+    fn assert_close(actual: [f32; 3], expected: [f32; 3]) {
+        for (a, e) in actual.into_iter().zip(expected) {
+            assert!((a - e).abs() < 1e-6, "{actual:?} != {expected:?}");
+        }
+    }
+
+    #[test]
+    fn shadow_intensity_scales_between_ambiance_and_full_shadow() {
+        let def = LightDef {
+            has_shadows: true,
+            ambiance_light: [1.0; 3],
+            shadows: [0.0, 0.5, 1.0],
+            ..LightDef::DEFAULT
+        };
+
+        // Full shadows reproduce the daytime colour (the lowest channel is
+        // raised to the 0.3 floor).
+        assert_eq!(def.effective_day_color(), [0.3, 1.0, 1.05]);
+
+        // Half intensity: k = 1, l = 0.5, so the multipliers are 0.5/1.0/1.5.
+        let half = LightingState {
+            shadow_intensity: 0.5,
+            ..LightingState::default()
+        };
+        assert_close(half.shade(&def), [0.5, 1.0, 1.05]);
+
+        // Disabling shadows returns the raw ambiance.
+        let none = LightingState {
+            shadow_intensity: 0.0,
+            ..LightingState::default()
+        };
+        assert_close(none.shade(&def), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn sun_color_only_affects_outdoor_lit_cells() {
+        let outdoor = LightDef {
+            allow_outdoor_lighting: true,
+            ..LightDef::DEFAULT
+        };
+        let indoor = LightDef {
+            allow_outdoor_lighting: false,
+            ..LightDef::DEFAULT
+        };
+        let state = LightingState {
+            sun_color: [0.5, 1.0, 0.25],
+            ..LightingState::default()
+        };
+
+        // The 0.25 channel is raised to the 0.3 lighting floor.
+        assert_close(state.shade(&outdoor), [0.5, 1.0, 0.3]);
+        assert_close(state.shade(&indoor), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn night_light_adds_the_offset_colour() {
+        let def = LightDef {
+            lights: [0.5, -0.5, -0.5],
+            has_night_light: true,
+            ..LightDef::DEFAULT
+        };
+
+        // k = 1, so the offset is added directly; negative channels survive
+        // down to the 0.3 floor.
+        let night = LightingState {
+            night_light_intensity: 0.5,
+            ..LightingState::default()
+        };
+        assert_close(night.shade(&def), [1.05, 0.5, 0.5]);
+
+        // A cell without a night light ignores the intensity.
+        let lit = LightDef {
+            has_night_light: false,
+            ..def
+        };
+        assert_close(night.shade(&lit), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn point_lights_fall_off_linearly_with_range() {
+        let def = LightDef::DEFAULT;
+        let state = LightingState {
+            point_lights: vec![PointLight2d {
+                position: [0.0, 0.0],
+                range: 2.0,
+                attenuation: 1.0,
+                intensity: 1.0,
+                color: [0.04, 0.02, 0.0],
+            }],
+            ..LightingState::default()
+        };
+
+        assert_close(state.shade_at(&def, 0.0, 0.0), [1.04, 1.02, 1.0]);
+        // Halfway across the range the contribution is halved.
+        assert_close(state.shade_at(&def, 1.0, 0.0), [1.02, 1.01, 1.0]);
+        // At the range edge and beyond the light contributes nothing.
+        assert_close(state.shade_at(&def, 2.0, 0.0), [1.0, 1.0, 1.0]);
+        assert_close(state.shade_at(&def, 3.0, 0.0), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn gray_shadow_and_light_disable_the_cell_effects() {
+        let gray = 0xFF80_8080u32 as i32;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0i16.to_le_bytes());
+        bytes.extend_from_slice(&0i16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // defcount
+        bytes.push(0); // indoor
+        bytes.extend_from_slice(&0i32.to_le_bytes()); // ambient
+        bytes.extend_from_slice(&gray.to_le_bytes()); // shadows = GRAY
+        bytes.extend_from_slice(&gray.to_le_bytes()); // lights = GRAY
+        bytes.extend_from_slice(&1i16.to_le_bytes()); // layer count (unused)
+        bytes.extend_from_slice(&1i16.to_le_bytes()); // lcount
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // lookup hash
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // layer index
+
+        let (cell, _) = LightCell::try_read(&bytes, LittleEndian).unwrap();
+        let def = cell.layer_colors.values().next().unwrap();
+        assert!(!def.has_shadows);
+        assert!(!def.has_night_light);
     }
 
     #[test]

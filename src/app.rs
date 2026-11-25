@@ -26,8 +26,8 @@ use crate::camera::{
 };
 use crate::premult_alpha;
 use crate::render::{
-    ChangeMapEvent, MapCatalog, MapRenderer, PendingMapLoad, animation_system, load_map_system,
-    load_renderer, rendering_system,
+    ChangeMapEvent, MapCatalog, MapRenderer, PendingMapLoad, animation_system, lighting_system,
+    load_map_system, load_renderer, rendering_system,
 };
 use crate::settings::MapViewSettings;
 
@@ -214,7 +214,7 @@ impl Plugin for VakfuCorePlugin {
         )
         .add_systems(
             PostUpdate,
-            (rendering_system, animation_system)
+            (lighting_system, rendering_system, animation_system)
                 .chain()
                 .after(CameraUpdateSystems)
                 .before(TransformSystems::Propagate),

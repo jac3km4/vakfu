@@ -490,7 +490,7 @@ mod tests {
         };
         let (sprites, _) = MapSpriteLibrary::try_read(&0u32.to_le_bytes(), LittleEndian).unwrap();
         assert_eq!(map.chunks()[0].elements().count(), 1);
-        let renderer = MapRenderer::new(&map, &sprites, &LightMap::default());
+        let renderer = MapRenderer::new(&map, &sprites, LightMap::default());
         assert_eq!(renderer.center(), bevy::prelude::Vec2::ZERO);
     }
 
