@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bevy::ecs::system::SystemParam;
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures_lite::future};
@@ -16,7 +17,7 @@ use crate::assets::{
     Animation, Frames, LightMap, Map, MapChunk, MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE,
     element_hashcode, iso_to_screen, round_up_to_power_of_two, sorted_altitude_order,
 };
-use crate::camera::CameraController;
+use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
 
 /// Elements are drawn by their world-space Z. Every map element stays inside
@@ -709,6 +710,9 @@ impl RTreeObject for Renderable {
 }
 
 #[derive(Component)]
+pub struct MapSprite;
+
+#[derive(Component)]
 pub struct AnimationState {
     frames: Arc<Frames>,
 }
@@ -753,7 +757,7 @@ pub fn load_map_system(
     mut catalog: ResMut<'_, MapCatalog>,
     mut render_state: ResMut<'_, MapRenderer>,
     mut camera_controller: ResMut<'_, CameraController>,
-    mut cameras: Query<'_, '_, &mut Transform, With<Camera>>,
+    mut cameras: Query<'_, '_, &mut Transform, With<MainCamera>>,
     mut pending_load: ResMut<'_, PendingMapLoad>,
 ) {
     if let Some(&ChangeMapEvent(target_map_id)) = events.read().last()
@@ -792,24 +796,26 @@ pub fn load_map_system(
     }
 }
 
+type MapSpriteQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Sprite,
+        &'static mut Transform,
+        &'static mut Visibility,
+    ),
+    (With<MapSprite>, Without<MainCamera>),
+>;
+
 #[derive(SystemParam)]
 pub struct RenderParams<'w, 's> {
     commands: Commands<'w, 's>,
     assets: Res<'w, AssetServer>,
-    cameras: Query<'w, 's, (Ref<'static, Camera>, Ref<'static, Transform>)>,
+    cameras: Query<'w, 's, (Ref<'static, Camera>, Ref<'static, Transform>), With<MainCamera>>,
     atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     render_state: ResMut<'w, MapRenderer>,
     settings: Res<'w, MapViewSettings>,
-    sprites: Query<
-        'w,
-        's,
-        (
-            &'static mut Sprite,
-            &'static mut Transform,
-            &'static mut Visibility,
-        ),
-        Without<Camera>,
-    >,
+    sprites: MapSpriteQuery<'w, 's>,
 }
 
 pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
@@ -969,6 +975,8 @@ fn render(
         Anchor::TOP_LEFT,
         Transform::from_translation(renderable.position),
         Visibility::Inherited,
+        MapSprite,
+        RenderLayers::layer(WORLD_LAYER),
     ));
 
     if let Animation::Frames(frames) = &renderable.animation {

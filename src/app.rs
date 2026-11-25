@@ -13,13 +13,17 @@ use std::sync::Arc;
 use anyhow::bail;
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::CameraUpdateSystems;
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
-use bevy_egui::{EguiPlugin, PrimaryEguiContext};
+use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use pico_args::Arguments;
 
 use crate::assets::{JarAssetSource, MapSpriteLibrary, TgamLoader};
-use crate::camera::{CameraController, camera_controller_system, camera_system};
+use crate::camera::{
+    CameraController, MainCamera, OverlayCamera, OVERLAY_LAYER, WORLD_LAYER,
+    camera_controller_system, camera_system,
+};
 use crate::premult_alpha;
 use crate::render::{
     ChangeMapEvent, MapCatalog, MapRenderer, PendingMapLoad, animation_system, load_map_system,
@@ -191,6 +195,12 @@ impl Plugin for VakfuCorePlugin {
         }))
         .add_plugins(premult_alpha::PremultAlphaPlugin)
         .add_plugins(EguiPlugin::default())
+        // The editor spawns a second camera for its overlay layer; without this
+        // bevy_egui could attach the primary context to either camera.
+        .insert_resource(EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
         .init_asset_loader::<TgamLoader>()
         .add_message::<ChangeMapEvent>()
         .insert_resource(self.catalog.clone())
@@ -208,7 +218,8 @@ impl Plugin for VakfuCorePlugin {
                 .chain()
                 .after(CameraUpdateSystems)
                 .before(TransformSystems::Propagate),
-        );
+        )
+        .add_systems(PostUpdate, sync_overlay_camera.before(CameraUpdateSystems));
     }
 }
 
@@ -225,13 +236,49 @@ pub fn build_app(window_title: &str, world: LoadedWorld) -> App {
     app
 }
 
-/// Spawns the 2D camera at the controller's initial position.
+/// Spawns the world camera and the editor overlay camera at the controller's
+/// initial position.
 fn setup(mut commands: Commands<'_, '_>, camera_controller: Res<'_, CameraController>) {
+    let transform = Transform::from_translation(camera_controller.current_position);
     commands.spawn((
         Camera2d,
         CompositingSpace::Linear,
-        Transform::from_translation(camera_controller.current_position),
+        MainCamera,
+        RenderLayers::layer(WORLD_LAYER),
+        transform,
     ));
+    // Drawn after the world camera with its own sorted pass, so overlay depth
+    // is independent of map sprite Z. It shares the main camera's transform.
+    // Egui renders into this pass too, keeping the UI above the overlays.
+    commands.spawn((
+        Camera2d,
+        CompositingSpace::Linear,
+        OverlayCamera,
+        PrimaryEguiContext,
+        EguiContext::default(),
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        RenderLayers::layer(OVERLAY_LAYER),
+        transform,
+    ));
+}
+
+/// Keeps the overlay camera aligned with the world camera every frame.
+fn sync_overlay_camera(
+    main: Query<'_, '_, &Transform, (With<MainCamera>, Without<OverlayCamera>)>,
+    mut overlay: Query<'_, '_, (&mut Transform, &mut GlobalTransform), With<OverlayCamera>>,
+) {
+    let Ok(main_transform) = main.single() else {
+        return;
+    };
+    let Ok((mut transform, mut global_transform)) = overlay.single_mut() else {
+        return;
+    };
+    transform.set_if_neq(*main_transform);
+    global_transform.set_if_neq(GlobalTransform::from(*main_transform));
 }
 
 /// Run condition: the primary egui context exists.

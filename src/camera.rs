@@ -4,6 +4,23 @@ use bevy::input::mouse::{MouseButtonInput, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy_egui::{EguiContext, PrimaryEguiContext, egui};
 
+/// Render layer containing every map sprite.
+pub const WORLD_LAYER: usize = 0;
+/// Render layer containing editor ghosts, grids and selection outlines.
+///
+/// A dedicated camera draws this layer after the world camera, so overlay
+/// depth never has to be interleaved with map sprite Z.
+pub const OVERLAY_LAYER: usize = 1;
+
+/// Marks the camera that follows [`CameraController`] and draws the map.
+#[derive(Component)]
+pub struct MainCamera;
+
+/// Marks the camera that draws the editor overlay layer on top of the map.
+#[derive(Component)]
+pub struct OverlayCamera;
+
+
 #[derive(Clone, Resource)]
 pub struct CameraController {
     pub dragging: bool,
@@ -185,7 +202,7 @@ pub fn camera_controller_system(
 
 pub fn camera_system(
     time: Res<'_, Time>,
-    mut cameras: Query<'_, '_, &mut Transform, With<Camera>>,
+    mut cameras: Query<'_, '_, &mut Transform, With<MainCamera>>,
     mut controller: ResMut<'_, CameraController>,
 ) -> Result {
     if controller.current_position == controller.target_position

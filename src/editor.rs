@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
 use bevy::input::mouse::MouseButtonInput;
@@ -11,7 +12,7 @@ use hashbrown::HashMap;
 use rstar::RTreeObject;
 
 use crate::assets::{Animation, iso_cell_diamond, iso_to_screen, screen_to_iso};
-use crate::camera::{CameraController, is_pointer_over_ui};
+use crate::camera::{CameraController, MainCamera, OVERLAY_LAYER, is_pointer_over_ui};
 use crate::render::{
     ChangeMapEvent, MapCatalog, MapRenderer, Renderable, RenderableSpec, atlas_layout_parts,
     premultiplied_tint,
@@ -927,7 +928,7 @@ pub struct EditorInputParams<'w, 's> {
     keys: Res<'w, ButtonInput<KeyCode>>,
     mouse_buttons: MessageReader<'w, 's, MouseButtonInput>,
     windows: Query<'w, 's, &'static Window>,
-    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform)>,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
     camera_controller: Res<'w, CameraController>,
     egui_contexts: Query<'w, 's, &'static mut bevy_egui::EguiContext, With<PrimaryEguiContext>>,
     catalog: Res<'w, MapCatalog>,
@@ -1385,7 +1386,12 @@ pub fn editor_ghost_system(params: EditorGhostParams<'_, '_>) {
         sprite.flip_x = def.flags().is_flip();
         sprite.custom_size = Some(Vec2::new(f32::from(dw), f32::from(dh)));
         let entity = commands
-            .spawn((sprite, Anchor::TOP_LEFT, Transform::from_translation(pos)))
+            .spawn((
+                sprite,
+                Anchor::TOP_LEFT,
+                Transform::from_translation(pos),
+                RenderLayers::layer(OVERLAY_LAYER),
+            ))
             .id();
         editor.ghost_entity = Some(entity);
         editor.ghost_def_id = Some(def_id);
@@ -1422,7 +1428,7 @@ pub fn editor_overlay_system(
     >,
     editor: Res<'_, EditorState>,
     renderer: Res<'_, MapRenderer>,
-    cameras: Query<'_, '_, &Transform, (With<Camera>, Without<EditorOverlayLine>)>,
+    cameras: Query<'_, '_, &Transform, (With<MainCamera>, Without<EditorOverlayLine>)>,
 ) {
     let zoom = cameras.single().map(|t| t.scale.x).unwrap_or(1.0);
     let thickness = (1.5 * zoom).max(1.0);
@@ -1551,6 +1557,7 @@ pub fn editor_overlay_system(
                 ..default()
             },
             target_transform,
+            RenderLayers::layer(OVERLAY_LAYER),
         ));
     }
 }
