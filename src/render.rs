@@ -818,12 +818,8 @@ fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
     if frames.total_time() == 0 {
         return 0;
     }
-    let elapsed = elapsed.as_millis() % u128::from(frames.total_time());
-    frames
-        .iter()
-        .take_while(|frame| u128::from(frame.time) <= elapsed)
-        .count()
-        .saturating_sub(1)
+    let elapsed = (elapsed.as_millis() % u128::from(frames.total_time())) as u32;
+    frames.frame_index_at(elapsed)
 }
 
 fn is_opaque_at_world(
@@ -865,10 +861,10 @@ fn is_opaque_at_world(
         Animation::None => (0, 0, elem.texture_size.x, elem.texture_size.y),
         Animation::Frames(frames) => {
             let idx = frame_index(frames, elapsed);
-            if let Some(frame) = frames.iter().nth(idx) {
+            if let Some([x, y]) = frames.frame_coords(idx) {
                 (
-                    u32::from(frame.x),
-                    u32::from(frame.y),
+                    u32::from(x),
+                    u32::from(y),
                     u32::from(frames.width()),
                     u32::from(frames.height()),
                 )

@@ -156,6 +156,8 @@ pub struct Frames {
     full_height: u16,
     /// A list of durations for each sequential frame.
     frame_durations: Vec<u16>,
+    /// The end time of each frame, i.e. the running sum of `frame_durations`.
+    cumulative_ends: Vec<u32>,
     /// A list of coordinates representing the top-left corner of each frame inside the texture sheet.
     frame_coords: Vec<[u16; 2]>,
 }
@@ -199,9 +201,26 @@ impl Frames {
             })
     }
 
+    /// Returns the coordinates of the frame at `index`.
+    pub fn frame_coords(&self, index: usize) -> Option<[u16; 2]> {
+        self.frame_coords.get(index).copied()
+    }
+
+    /// Returns the index of the frame active at `elapsed` milliseconds.
+    ///
+    /// Uses the precomputed running end times so the lookup is logarithmic in
+    /// the frame count instead of scanning every frame.
+    pub fn frame_index_at(&self, elapsed: u32) -> usize {
+        let index = self
+            .cumulative_ends
+            .partition_point(|&end| end <= elapsed);
+        index.min(self.frame_durations.len().saturating_sub(1))
+    }
+
     #[cfg(test)]
     pub fn new_for_test(total_time: u32, frame_durations: Vec<u16>) -> Self {
         let frame_coords = vec![[0, 0]; frame_durations.len()];
+        let cumulative_ends = cumulative_ends(&frame_durations);
         Self {
             total_time,
             width: 16,
@@ -209,9 +228,22 @@ impl Frames {
             full_width: 16,
             full_height: 16,
             frame_durations,
+            cumulative_ends,
             frame_coords,
         }
     }
+}
+
+/// Returns the running end time of each frame.
+fn cumulative_ends(frame_durations: &[u16]) -> Vec<u32> {
+    let mut elapsed = 0u32;
+    frame_durations
+        .iter()
+        .map(|&duration| {
+            elapsed += u32::from(duration);
+            elapsed
+        })
+        .collect()
 }
 
 impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {
@@ -231,6 +263,7 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {
             .read_iter::<[u16; 2]>(offset, ctx)
             .take(count as usize)
             .collect::<Result<Vec<[u16; 2]>, _>>()?;
+        let cumulative_ends = cumulative_ends(&frame_durations);
 
         Ok((
             Frames {
@@ -240,6 +273,7 @@ impl<C: Endianess> TryRead<'_, (C, u8)> for Frames {
                 full_width,
                 full_height,
                 frame_durations,
+                cumulative_ends,
                 frame_coords,
             },
             *offset,
@@ -317,5 +351,30 @@ impl<'a, C: Endianess> TryRead<'a, C> for MapSpriteLibrary {
             elements.insert(element.id, element);
         }
         Ok((Self { elements }, *offset))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_lookup_honours_boundaries() {
+        let frames = Frames::new_for_test(300, vec![100, 100, 100]);
+        assert_eq!(frames.frame_index_at(0), 0);
+        assert_eq!(frames.frame_index_at(99), 0);
+        assert_eq!(frames.frame_index_at(100), 1);
+        assert_eq!(frames.frame_index_at(199), 1);
+        assert_eq!(frames.frame_index_at(200), 2);
+        assert_eq!(frames.frame_index_at(299), 2);
+    }
+
+    #[test]
+    fn frame_lookup_clamps_out_of_range_times() {
+        let frames = Frames::new_for_test(100, vec![50, 50]);
+        // Malformed assets can declare a total longer than the durations sum.
+        assert_eq!(frames.frame_index_at(500), 1);
+        let empty = Frames::new_for_test(0, Vec::new());
+        assert_eq!(empty.frame_index_at(0), 0);
     }
 }
