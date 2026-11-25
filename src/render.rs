@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::mem;
 use std::path::Path;
@@ -60,6 +61,8 @@ pub struct MapRenderer {
     center: Vec2,
     used_definitions: Vec<i32>,
     available_layers: Vec<u8>,
+    /// Altitude-order counts per cell, for exact placement lookup.
+    cell_altitudes: HashMap<(i32, i32), BTreeMap<u8, u32>>,
 }
 
 /// The definition-independent inputs for placing a sprite.
@@ -191,6 +194,15 @@ impl MapRenderer {
         let mut available_layers: Vec<u8> = layers_set.into_iter().collect();
         available_layers.sort_unstable();
 
+        let mut cell_altitudes: HashMap<(i32, i32), BTreeMap<u8, u32>> = HashMap::new();
+        for elem in &renderables {
+            *cell_altitudes
+                .entry((elem.cell_x, elem.cell_y))
+                .or_default()
+                .entry(elem.altitude_order)
+                .or_insert(0) += 1;
+        }
+
         Self {
             rtree: RTree::bulk_load(renderables),
             uid_envelopes,
@@ -202,6 +214,7 @@ impl MapRenderer {
             center,
             used_definitions,
             available_layers,
+            cell_altitudes,
         }
     }
 
@@ -299,14 +312,36 @@ impl MapRenderer {
 
     /// Returns an `altitude_order` higher than any existing element on `(cell_x, cell_y)`.
     pub fn next_altitude_order_at(&self, cell_x: i32, cell_y: i32) -> u8 {
-        let (sx, _) = iso_to_screen(cell_x, cell_y, 0);
-        let strip = AABB::from_corners((sx - 1024.0, -1_000_000.0), (sx + 1024.0, 1_000_000.0));
-        self.rtree
-            .locate_in_envelope_intersecting(strip)
-            .filter(|elem| elem.cell_x == cell_x && elem.cell_y == cell_y)
-            .map(|elem| elem.altitude_order)
-            .max()
-            .map_or(0, |max_alt| max_alt.saturating_add(1))
+        self.cell_altitudes
+            .get(&(cell_x, cell_y))
+            .and_then(BTreeMap::last_key_value)
+            .map_or(0, |(&max_alt, _)| max_alt.saturating_add(1))
+    }
+
+    /// Records an element's altitude order in the per-cell index.
+    fn register_altitude(&mut self, cell: (i32, i32), altitude_order: u8) {
+        *self
+            .cell_altitudes
+            .entry(cell)
+            .or_default()
+            .entry(altitude_order)
+            .or_insert(0) += 1;
+    }
+
+    /// Removes an element's altitude order from the per-cell index.
+    fn unregister_altitude(&mut self, cell: (i32, i32), altitude_order: u8) {
+        let Some(altitudes) = self.cell_altitudes.get_mut(&cell) else {
+            return;
+        };
+        if let Some(count) = altitudes.get_mut(&altitude_order) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                altitudes.remove(&altitude_order);
+            }
+        }
+        if altitudes.is_empty() {
+            self.cell_altitudes.remove(&cell);
+        }
     }
 
     pub fn build_renderable(&mut self, spec: RenderableSpec<'_>) -> Renderable {
@@ -375,6 +410,8 @@ impl MapRenderer {
     pub fn insert_element(&mut self, mut elem: Renderable) {
         elem.id = None;
         let env = elem.envelope();
+        let cell = (elem.cell_x, elem.cell_y);
+        let altitude_order = elem.altitude_order;
         self.uid_envelopes.insert(elem.uid, env);
         if let Err(idx) = self.used_definitions.binary_search(&elem.definition_id) {
             self.used_definitions.insert(idx, elem.definition_id);
@@ -383,6 +420,7 @@ impl MapRenderer {
             self.available_layers.insert(idx, elem.layer);
         }
         self.rtree.insert(elem);
+        self.register_altitude(cell, altitude_order);
     }
 
     pub fn remove_element(&mut self, uid: u64) -> Option<Renderable> {
@@ -393,6 +431,7 @@ impl MapRenderer {
             .find(|r| r.uid == uid)?
             .clone();
         let removed = self.rtree.remove(&target)?;
+        self.unregister_altitude((removed.cell_x, removed.cell_y), removed.altitude_order);
         if let Some(entity) = removed.id {
             self.last_seen.remove(&entity);
             self.pending_despawns.push(entity);
@@ -420,13 +459,17 @@ impl MapRenderer {
             .find(|r| r.uid == elem.uid)?
             .clone();
         let old = self.rtree.remove(&target)?;
+        self.unregister_altitude((old.cell_x, old.cell_y), old.altitude_order);
         elem.id = old.id;
         let new_env = elem.envelope();
+        let cell = (elem.cell_x, elem.cell_y);
+        let altitude_order = elem.altitude_order;
         self.uid_envelopes.insert(elem.uid, new_env);
         if let Err(idx) = self.available_layers.binary_search(&elem.layer) {
             self.available_layers.insert(idx, elem.layer);
         }
         self.rtree.insert(elem);
+        self.register_altitude(cell, altitude_order);
         Some(old)
     }
 
@@ -986,6 +1029,7 @@ mod tests {
                 center: Vec2::ZERO,
                 used_definitions: Vec::new(),
                 available_layers: Vec::new(),
+                cell_altitudes: HashMap::new(),
             })
             .insert_resource(CameraController::default())
             .insert_resource(PendingMapLoad {
@@ -1144,6 +1188,7 @@ mod tests {
             center: Vec2::ZERO,
             used_definitions: vec![10, 99],
             available_layers: vec![0],
+            cell_altitudes: HashMap::new(),
         };
         renderer.uid_envelopes.insert(1, elem_top_z.envelope());
         renderer.uid_envelopes.insert(2, elem_solid.envelope());
@@ -1157,6 +1202,41 @@ mod tests {
         // Clicking at bottom-right (wx=18, wy=2): elem_top_z is opaque there -> picks elem_top_z (uid 1)!
         let picked_solid = renderer.pick_at_world(18.0, 2.0, &settings, &images, Duration::ZERO);
         assert_eq!(picked_solid.map(|r| r.uid), Some(1));
+    }
+
+    #[test]
+    fn altitude_index_tracks_inserts_updates_and_removals() {
+        let mut renderer = MapRenderer {
+            rtree: RTree::new(),
+            uid_envelopes: HashMap::new(),
+            next_uid: 1,
+            last_seen: HashMap::new(),
+            spare_seen: HashMap::new(),
+            pending_despawns: Vec::new(),
+            sprite_assets: HashMap::new(),
+            center: Vec2::ZERO,
+            used_definitions: Vec::new(),
+            available_layers: Vec::new(),
+            cell_altitudes: HashMap::new(),
+        };
+        assert_eq!(renderer.next_altitude_order_at(1, 2), 0);
+
+        renderer.register_altitude((1, 2), 3);
+        renderer.register_altitude((1, 2), 3);
+        renderer.register_altitude((1, 2), 250);
+        assert_eq!(renderer.next_altitude_order_at(1, 2), 251);
+
+        renderer.unregister_altitude((1, 2), 250);
+        assert_eq!(renderer.next_altitude_order_at(1, 2), 4);
+        renderer.unregister_altitude((1, 2), 3);
+        assert_eq!(renderer.next_altitude_order_at(1, 2), 4);
+        renderer.unregister_altitude((1, 2), 3);
+        assert_eq!(renderer.next_altitude_order_at(1, 2), 0);
+        assert!(renderer.cell_altitudes.is_empty());
+
+        // Saturates rather than wrapping at the top of the range.
+        renderer.register_altitude((1, 2), u8::MAX);
+        assert_eq!(renderer.next_altitude_order_at(1, 2), u8::MAX);
     }
 
     #[test]
@@ -1220,6 +1300,7 @@ mod tests {
             center: Vec2::ZERO,
             used_definitions: Vec::new(),
             available_layers: Vec::new(),
+            cell_altitudes: HashMap::new(),
         };
 
         // Placing above z=10.0 should land between 10.0 and 20.0 (15.0)
