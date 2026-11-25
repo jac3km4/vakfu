@@ -230,25 +230,29 @@ pub struct Rgba {
 
 impl Rgba {
     /// Converts the color to an array of 4 `f32` values.
+    ///
+    /// RGB channels use the engine's `gColorScale = 2.0`, which the reference
+    /// renderer applies to RGB only (`GL_RGB_SCALE`). Alpha is decoded on its
+    /// own and clamped to `[0, 1]`; it must *not* receive the RGB scale.
     pub fn to_f32_array(self) -> [f32; 4] {
         [
-            ((self.r as f32 / 255. + 0.5) * 2.).max(0.),
-            ((self.g as f32 / 255. + 0.5) * 2.).max(0.),
-            ((self.b as f32 / 255. + 0.5) * 2.).max(0.),
-            ((self.a as f32 / 255. + 0.5) * 2.).clamp(0., 1.),
+            rgb_to_f32(self.r),
+            rgb_to_f32(self.g),
+            rgb_to_f32(self.b),
+            alpha_to_f32(self.a),
         ]
     }
 }
 
-impl From<Rgb> for Rgba {
-    fn from(rgb: Rgb) -> Self {
-        Rgba {
-            r: rgb.r,
-            g: rgb.g,
-            b: rgb.b,
-            a: 0,
-        }
-    }
+/// Decodes a single tint channel: `byte / 255 + 0.5`, scaled by the engine's
+/// `gColorScale` of `2.0` and clamped to non-negative values.
+fn rgb_to_f32(value: i8) -> f32 {
+    ((value as f32 / 255. + 0.5) * 2.).max(0.)
+}
+
+/// Decodes an alpha channel: `byte / 255 + 0.5`, clamped to `[0, 1]`.
+fn alpha_to_f32(value: i8) -> f32 {
+    (value as f32 / 255. + 0.5).clamp(0., 1.)
 }
 
 /// A color applied to a map element.
@@ -277,14 +281,21 @@ pub enum Color {
     RgbaGradient(Rgba, #[allow(dead_code)] Rgba),
 }
 
-impl From<Color> for Rgba {
-    fn from(color: Color) -> Self {
-        match color {
-            Color::None => Rgba::default(),
-            Color::Rgb(rgb) => Rgba::from(rgb),
-            Color::Rgba(rgba) => rgba,
-            Color::RgbGradient(start, _) => Rgba::from(start),
-            Color::RgbaGradient(start, _) => start,
+impl Color {
+    /// Decodes the element tint the way the reference engine does.
+    ///
+    /// A missing RGB tint defaults to `0.5` (identity once the `gColorScale`
+    /// of `2.0` is applied) and a missing alpha defaults to `1.0`. Gradient
+    /// elements are left untinted because the reference engine skips colour
+    /// processing for them; per-vertex gradients are not modelled yet.
+    pub fn to_f32_array(self) -> [f32; 4] {
+        match self {
+            Color::Rgb(rgb) => [rgb_to_f32(rgb.r), rgb_to_f32(rgb.g), rgb_to_f32(rgb.b), 1.],
+            Color::Rgba(rgba) => rgba.to_f32_array(),
+            // No tint and gradients are both left untinted: the engine defaults
+            // RGB to 0.5 (identity after the 2x scale) and alpha to 1.0, and
+            // skips colour processing for gradients entirely.
+            Color::None | Color::RgbGradient(..) | Color::RgbaGradient(..) => [1., 1., 1., 1.],
         }
     }
 }
@@ -475,29 +486,50 @@ mod tests {
     }
 
     #[test]
-    fn test_rgba_to_f32_array_clamping() {
-        let rgba = Rgba {
-            r: 127,
-            g: -128,
-            b: 0,
-            a: 127,
-        };
-        let arr = rgba.to_f32_array();
-        assert!(arr[0] >= 0.0);
-        assert!(arr[1] >= 0.0);
-        assert!(arr[2] >= 0.0);
-        assert!((0.0..=1.0).contains(&arr[3]));
+    fn test_rgba_to_f32_array_decoding() {
+        // Alpha is decoded as `byte / 255 + 0.5`, clamped, and never doubled.
+        let alpha = |a: i8| Rgba { r: 0, g: 0, b: 0, a }.to_f32_array()[3];
+        assert_eq!(alpha(0), 0.5);
+        assert!((alpha(127) - (127.0 / 255.0 + 0.5)).abs() < 1e-6);
+        assert_eq!(alpha(-128), 0.0);
 
-        let clamped = Rgba {
-            r: -128,
-            g: -128,
-            b: -128,
-            a: -128,
-        }
+        // RGB keeps the 2x colour scale and is clamped to non-negative values.
+        let rgb = |v: i8| {
+            let arr = Rgba {
+                r: v,
+                g: v,
+                b: v,
+                a: 0,
+            }
+            .to_f32_array();
+            [arr[0], arr[1], arr[2]]
+        };
+        assert_eq!(rgb(0), [1.0, 1.0, 1.0]);
+        assert_eq!(rgb(-128), [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_color_to_f32_array_defaults() {
+        // No tint decodes to identity; RGB defaults to 0.5 (x2 = 1.0) and
+        // alpha defaults to 1.0.
+        assert_eq!(Color::None.to_f32_array(), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(
+            Color::Rgb(Rgb { r: 0, g: 0, b: 0 }).to_f32_array(),
+            [1.0, 1.0, 1.0, 1.0]
+        );
+        // Gradients are left untinted, matching the reference engine.
+        assert_eq!(
+            Color::RgbGradient(Rgb { r: 127, g: -128, b: 0 }, Rgb::default()).to_f32_array(),
+            [1.0, 1.0, 1.0, 1.0]
+        );
+        // RGBA carries an explicit, non-doubled alpha.
+        let rgba = Color::Rgba(Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        })
         .to_f32_array();
-        assert_eq!(clamped[0], 0.0);
-        assert_eq!(clamped[1], 0.0);
-        assert_eq!(clamped[2], 0.0);
-        assert_eq!(clamped[3], 0.0);
+        assert_eq!(rgba, [1.0, 1.0, 1.0, 0.5]);
     }
 }

@@ -12,7 +12,7 @@ use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
     Animation, Frames, LightMap, Map, MapChunk, MapElementDetails, MapSpriteDefinition,
-    MapSpriteLibrary, Rgba, element_hashcode, iso_to_screen,
+    MapSpriteLibrary, element_hashcode, iso_to_screen,
 };
 use crate::camera::CameraController;
 use crate::settings::MapViewSettings;
@@ -112,7 +112,7 @@ impl MapRenderer {
 
                 let light_def =
                     light_map.get_color(elem.cell_x(), elem.cell_y(), group.layer() as i32);
-                let [r, g, b, a] = Rgba::from(elem.color()).to_f32_array();
+                let [r, g, b, a] = elem.color().to_f32_array();
                 let color = LinearRgba::new(r, g, b, a);
                 let color_tinted = {
                     let [r, g, b] = light_def.ambiance_light;
