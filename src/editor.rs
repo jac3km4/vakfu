@@ -575,8 +575,15 @@ pub fn editor_ui_system(
                                     let v = u32::from(v.max(1));
                                     (if v < 2 { v } else { v.next_power_of_two() }) as f32
                                 };
-                                let tw = pow2(sw);
-                                let th = pow2(sh);
+                                // The atlas canvas follows the padded TGAM
+                                // dimensions: the sampled rectangle for static
+                                // sprites, the full sheet for animated ones.
+                                let (tw, th) = match def.animation() {
+                                    Animation::None => (pow2(sw), pow2(sh)),
+                                    Animation::Frames(frames) => {
+                                        (pow2(frames.full_width()), pow2(frames.full_height()))
+                                    }
+                                };
                                 let uv = match def.animation() {
                                     Animation::None => EguiRect::from_min_max(
                                         Pos2::ZERO,

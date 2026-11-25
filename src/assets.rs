@@ -20,7 +20,7 @@ pub use map::{
     screen_to_iso,
 };
 pub use sprite::{Animation, Frames, MapSpriteDefinition, MapSpriteLibrary};
-pub use tgam::Tgam;
+pub use tgam::{Tgam, round_up_to_power_of_two};
 use thiserror::Error;
 
 #[derive(Debug, Default, bevy::reflect::TypePath)]
@@ -42,8 +42,8 @@ impl AssetLoader for TgamLoader {
 
         let (tgam, _) = Tgam::try_read(&bytes, LittleEndian)?;
         let extent = Extent3d {
-            width: tgam.width(),
-            height: tgam.height(),
+            width: tgam.padded_width(),
+            height: tgam.padded_height(),
             depth_or_array_layers: 1,
         };
         let img = Image::new(

@@ -12,7 +12,7 @@ use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
     Animation, Frames, LightMap, Map, MapChunk, MapElementDetails, MapSpriteDefinition,
-    MapSpriteLibrary, element_hashcode, iso_to_screen,
+    MapSpriteLibrary, element_hashcode, iso_to_screen, round_up_to_power_of_two,
 };
 use crate::camera::CameraController;
 use crate::settings::MapViewSettings;
@@ -850,13 +850,27 @@ pub fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
     atlas_layout_parts(renderable.texture_size, &renderable.animation)
 }
 
-pub fn atlas_layout_parts(texture_size: UVec2, animation: &Animation) -> TextureAtlasLayout {
-    let mut layout = TextureAtlasLayout::new_empty(texture_size);
+/// Builds a texture atlas for a sprite.
+///
+/// `sample_size` is the sampled rectangle for a static sprite (`render_width`
+/// x `render_height`). The atlas canvas must match the padded power-of-two
+/// dimensions of the loaded TGAM image, otherwise the UVs are normalised
+/// against the wrong size: for static sprites that is `pow2(sample_size)`, and
+/// for animated sprites the full sprite sheet `pow2(full_width x full_height)`.
+pub fn atlas_layout_parts(sample_size: UVec2, animation: &Animation) -> TextureAtlasLayout {
+    let canvas = match animation {
+        Animation::None => padded(sample_size),
+        Animation::Frames(frames) => UVec2::new(
+            round_up_to_power_of_two(frames.full_width().into()),
+            round_up_to_power_of_two(frames.full_height().into()),
+        ),
+    };
+    let mut layout = TextureAtlasLayout::new_empty(canvas);
     match animation {
         Animation::None => {
             layout.add_texture(URect {
                 min: UVec2::ZERO,
-                max: texture_size,
+                max: sample_size,
             });
         }
         Animation::Frames(frames) => {
@@ -871,6 +885,14 @@ pub fn atlas_layout_parts(texture_size: UVec2, animation: &Animation) -> Texture
         }
     };
     layout
+}
+
+/// Rounds both components up to the nearest power of two.
+pub fn padded(size: UVec2) -> UVec2 {
+    UVec2::new(
+        round_up_to_power_of_two(size.x),
+        round_up_to_power_of_two(size.y),
+    )
 }
 
 #[cfg(test)]

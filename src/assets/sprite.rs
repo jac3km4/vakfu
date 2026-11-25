@@ -144,10 +144,8 @@ pub struct Frames {
     /// The target height of the frame to render.
     height: u16,
     /// The full actual width of the sprite sheet.
-    #[allow(dead_code)]
     full_width: u16,
     /// The full actual height of the sprite sheet.
-    #[allow(dead_code)]
     full_height: u16,
     /// A list of durations for each sequential frame.
     frame_durations: Vec<u16>,
@@ -169,6 +167,16 @@ impl Frames {
     /// Returns the height of a frame.
     pub fn height(&self) -> u16 {
         self.height
+    }
+
+    /// Returns the full width of the underlying sprite sheet.
+    pub fn full_width(&self) -> u16 {
+        self.full_width
+    }
+
+    /// Returns the full height of the underlying sprite sheet.
+    pub fn full_height(&self) -> u16 {
+        self.full_height
     }
 
     /// Returns an iterator over the individual frames.

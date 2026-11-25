@@ -27,14 +27,26 @@ impl<'a> Tgam<'a> {
 
     /// Returns the width of the image, rounded up to the nearest power of two.
     #[inline]
-    pub fn width(&self) -> u32 {
+    pub fn padded_width(&self) -> u32 {
         round_up_to_power_of_two(self.width.into())
     }
 
     /// Returns the height of the image, rounded up to the nearest power of two.
     #[inline]
-    pub fn height(&self) -> u32 {
+    pub fn padded_height(&self) -> u32 {
         round_up_to_power_of_two(self.height.into())
+    }
+
+    /// Returns the physical (unpadded) width of the image.
+    #[inline]
+    pub fn physical_width(&self) -> u16 {
+        self.width
+    }
+
+    /// Returns the physical (unpadded) height of the image.
+    #[inline]
+    pub fn physical_height(&self) -> u16 {
+        self.height
     }
 }
 
