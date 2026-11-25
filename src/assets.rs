@@ -1,3 +1,4 @@
+mod groups;
 mod light;
 mod map;
 mod sprite;
@@ -14,6 +15,7 @@ use bevy::image::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
+pub use groups::GroupVisibility;
 pub use light::{LightDef, LightMap, LightingState, PointLight2d};
 pub use map::{
     Map, MapChunk, MapElementDetails, Rgba, TINT_SCALE, element_hashcode, iso_cell_diamond,
