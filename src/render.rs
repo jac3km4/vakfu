@@ -695,7 +695,10 @@ impl MapRenderer {
         let (min_x, min_y, sub_w, sub_h) = match &elem.animation {
             Animation::None => (0, 0, elem.texture_size.x, elem.texture_size.y),
             Animation::Frames(frames) => {
-                let idx = frame_index(frames, elapsed);
+                let idx = frame_index(
+                    frames,
+                    animation_elapsed(elapsed, animation_phase(elem.uid)),
+                );
                 if let Some([x, y]) = frames.frame_coords(idx) {
                     (
                         u32::from(x),
@@ -863,6 +866,9 @@ pub struct WaterElement {
 #[derive(Component)]
 pub struct AnimationState {
     frames: Arc<Frames>,
+    /// Per-element start offset in milliseconds, like `DisplayedScreenElement`
+    /// seeding each sprite with a random animation time.
+    phase_ms: u32,
 }
 
 pub fn load_renderer(
@@ -1151,7 +1157,10 @@ pub fn animation_system(
         if *visibility == Visibility::Hidden {
             continue;
         }
-        let index = frame_index(&state.frames, time.elapsed());
+        let index = frame_index(
+            &state.frames,
+            animation_elapsed(time.elapsed(), state.phase_ms),
+        );
         if let Some(atlas) = sprite.texture_atlas.as_mut()
             && atlas.index != index
         {
@@ -1283,6 +1292,7 @@ fn render(
     if let Animation::Frames(frames) = &renderable.animation {
         entity.insert(AnimationState {
             frames: frames.clone(),
+            phase_ms: animation_phase(renderable.uid),
         });
     }
 
@@ -1336,12 +1346,30 @@ fn camera_bounds(camera: &Camera, transform: &GlobalTransform) -> Option<AABB<(f
 }
 
 fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
-    // A shared clock keeps instances synchronized, including after culling.
+    // Callers pass the element's phase-adjusted clock.
     if frames.total_time() == 0 {
         return 0;
     }
     let elapsed = (elapsed.as_millis() % u128::from(frames.total_time())) as u32;
     frames.frame_index_at(elapsed)
+}
+
+/// Returns the animation clock for an element with a per-instance phase.
+fn animation_elapsed(base: Duration, phase_ms: u32) -> Duration {
+    base + Duration::from_millis(u64::from(phase_ms))
+}
+
+/// Derives a stable 16-bit animation phase from the element uid.
+///
+/// `DisplayedScreenElement.createSprite` seeds each element with a random
+/// 16-bit time (`MathHelper.random(Integer.MAX_VALUE)` truncated to a short),
+/// so instances of the same sprite do not animate in lockstep.
+fn animation_phase(uid: u64) -> u32 {
+    let mut x = uid.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+    x ^= x >> 33;
+    (x >> 16) as u32 & 0xFFFF
 }
 
 pub fn premultiplied_tint(color: LinearRgba) -> Color {
@@ -1635,6 +1663,19 @@ mod tests {
         assert!((water_scale(0.0, 0.0, quarter_time) - 1.001).abs() < 1e-6);
         // At three quarters the negative lobe is damped to a fifth.
         assert!((water_scale(WATER_WIDTH * 0.75, 0.0, 0.0) - 0.9998).abs() < 1e-6);
+    }
+
+    #[test]
+    fn animation_phase_is_stable_and_in_range() {
+        assert_eq!(animation_phase(42), animation_phase(42));
+        for uid in 0..1000 {
+            assert!(animation_phase(uid) <= 0xFFFF);
+        }
+        assert_ne!(animation_phase(1), animation_phase(2));
+        assert_eq!(
+            animation_elapsed(Duration::from_millis(10), 5),
+            Duration::from_millis(15)
+        );
     }
 
     #[test]
