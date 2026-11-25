@@ -21,6 +21,12 @@ pub struct LightDef {
     pub shadows: [f32; 3],
     /// Night-light colour offset (`byte / 255 - 0.5`).
     pub lights: [f32; 3],
+    /// The cell's `allowOutdoorLighting` flag.
+    ///
+    /// Kept for data fidelity, but the reference renderer never consults it:
+    /// `SunLightModifier` is registered per map and multiplies every lit
+    /// object. `CellLightDef.m_allowOutdoorLighting` is only compared in
+    /// `equals`.
     pub allow_outdoor_lighting: bool,
     pub has_shadows: bool,
     /// Whether the cell defines a night light (its `lights` colour is not gray).
@@ -102,12 +108,15 @@ impl LightingState {
     /// Computes the lit colour of a static cell, mirroring the modifier order
     /// installed by `IsoSceneLightManager.reset`:
     ///
-    /// 1. `SunLightModifier` (priority 0) multiplies outdoor-lit cells.
+    /// 1. `SunLightModifier` (priority 0) multiplies every lit object. The
+    ///    reference registers it per map; the cell's `allowOutdoorLighting`
+    ///    flag is not consulted.
     /// 2. `ClampShadowLitModifier` (300) floors the running colour at 0.3.
     /// 3. `LightningMapManager` (400) multiplies by the merged cell colour and
     ///    adds the night light.
     /// 4. `IsoLightSourceModifier` (600) adds dynamic light contributions.
-    /// 5. `ClampLightLitModifier` (800) caps the result at 1.05.
+    /// 5. `ClampLightLitModifier` (800) caps the result at 1.05. It only bounds
+    ///    the ceiling; the reference leaves darker results untouched.
     pub fn shade(&self, def: &LightDef) -> [f32; 3] {
         self.shade_at(def, 0.0, 0.0)
     }
@@ -115,12 +124,8 @@ impl LightingState {
     /// Like [`Self::shade`], but evaluates the dynamic point lights at the
     /// given cell position.
     pub fn shade_at(&self, def: &LightDef, cell_x: f32, cell_y: f32) -> [f32; 3] {
-        let mut color = [1.0; 3];
-        if def.allow_outdoor_lighting {
-            for (channel, sun) in color.iter_mut().zip(self.sun_color) {
-                *channel *= sun;
-            }
-        }
+        // SunLightModifier (priority 0): multiplies every lit object.
+        let mut color = self.sun_color;
         // ClampShadowLitModifier (priority 300).
         for channel in &mut color {
             *channel = channel.max(SHADOW_MIN);
@@ -139,10 +144,11 @@ impl LightingState {
                 color[channel] += contribution[channel];
             }
         }
-        // ClampLightLitModifier (priority 800). The reference only caps the
-        // ceiling there; the floor also keeps sprite tints non-negative.
+        // ClampLightLitModifier (priority 800): the reference only caps the
+        // ceiling, so results below 0.3 (for example from shadowed cells or
+        // subtractive night lights) are left alone.
         for channel in &mut color {
-            *channel = channel.clamp(SHADOW_MIN, LIGHT_MAX);
+            *channel = channel.min(LIGHT_MAX);
         }
         color
     }
@@ -404,30 +410,31 @@ mod tests {
     }
 
     #[test]
-    fn effective_day_color_applies_shadows_then_clamps() {
-        // No shadows: only the [0.3, 1.05] clamp applies.
+    fn effective_day_color_applies_shadows_then_caps() {
+        // No shadows: the ambient colour is used unchanged.
         assert_eq!(
             LightDef::DEFAULT.effective_day_color(),
             [1.0, 1.0, 1.0]
         );
 
-        // 1 * 0.5 * 2 = 1.0, 1 * 1.0 * 2 = 2.0 -> 1.05, 1 * 0.1 * 2 = 0.2 -> 0.3.
+        // 1 * 0.5 * 2 = 1.0, 1 * 1.0 * 2 = 2.0 -> 1.05, 1 * 0.1 * 2 = 0.2.
+        // `ClampLightLitModifier` only caps the ceiling, so 0.2 is kept.
         let lit = LightDef {
             has_shadows: true,
             ambiance_light: [1.0, 1.0, 1.0],
             shadows: [0.5, 1.0, 0.1],
             ..LightDef::DEFAULT
         };
-        assert_eq!(lit.effective_day_color(), [1.0, 1.05, 0.3]);
+        assert_eq!(lit.effective_day_color(), [1.0, 1.05, 0.2]);
 
-        // The shadow product is clamped to [0, 2] before the final clamp.
+        // The shadow product is clamped to [0, 2] before the final cap.
         let bright = LightDef {
             has_shadows: true,
             ambiance_light: [2.0, 0.0, 1.0],
             shadows: [1.0, 1.0, 1.0],
             ..LightDef::DEFAULT
         };
-        assert_eq!(bright.effective_day_color(), [1.05, 0.3, 1.05]);
+        assert_eq!(bright.effective_day_color(), [1.05, 0.0, 1.05]);
     }
 
     fn assert_close(actual: [f32; 3], expected: [f32; 3]) {
@@ -445,9 +452,10 @@ mod tests {
             ..LightDef::DEFAULT
         };
 
-        // Full shadows reproduce the daytime colour (the lowest channel is
-        // raised to the 0.3 floor).
-        assert_eq!(def.effective_day_color(), [0.3, 1.0, 1.05]);
+        // Full shadows reproduce the daytime colour. The 0.3 floor is applied
+        // before the light-map multiply, so a zero shadow multiplier leaves the
+        // channel at 0; only the 1.05 ceiling applies afterwards.
+        assert_eq!(def.effective_day_color(), [0.0, 1.0, 1.05]);
 
         // Half intensity: k = 1, l = 0.5, so the multipliers are 0.5/1.0/1.5.
         let half = LightingState {
@@ -465,7 +473,9 @@ mod tests {
     }
 
     #[test]
-    fn sun_color_only_affects_outdoor_lit_cells() {
+    fn sun_color_applies_to_every_cell() {
+        // `SunLightModifier` multiplies every lit object; the reference never
+        // consults `CellLightDef.m_allowOutdoorLighting`.
         let outdoor = LightDef {
             allow_outdoor_lighting: true,
             ..LightDef::DEFAULT
@@ -479,9 +489,10 @@ mod tests {
             ..LightingState::default()
         };
 
-        // The 0.25 channel is raised to the 0.3 lighting floor.
+        // The 0.25 channel is raised to the 0.3 shadow floor before the
+        // light-map multiply.
         assert_close(state.shade(&outdoor), [0.5, 1.0, 0.3]);
-        assert_close(state.shade(&indoor), [1.0, 1.0, 1.0]);
+        assert_close(state.shade(&indoor), [0.5, 1.0, 0.3]);
     }
 
     #[test]
@@ -492,8 +503,8 @@ mod tests {
             ..LightDef::DEFAULT
         };
 
-        // k = 1, so the offset is added directly; negative channels survive
-        // down to the 0.3 floor.
+        // k = 1, so the offset is added directly; the additive result is only
+        // capped at 1.05 by `ClampLightLitModifier`.
         let night = LightingState {
             night_light_intensity: 0.5,
             ..LightingState::default()
