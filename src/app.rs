@@ -20,7 +20,9 @@ use bevy::transform::TransformSystems;
 use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use pico_args::Arguments;
 
-use crate::assets::{GroupVisibility, JarAssetSource, MapSpriteLibrary, TgamLoader};
+use crate::assets::{
+    GroupVisibility, JarAssetSource, MapSpriteLibrary, TgamLoader, TgamMaskLibrary,
+};
 use crate::camera::{
     CameraController, MainCamera, OverlayCamera, OVERLAY_LAYER, WORLD_LAYER,
     camera_controller_system, camera_system,
@@ -104,6 +106,7 @@ pub struct LoadedWorld {
     pub camera_controller: CameraController,
     pub asset_source: JarAssetSource,
     pub group_visibility: Option<GroupVisibility>,
+    pub masks: TgamMaskLibrary,
 }
 
 impl LoadedWorld {
@@ -154,7 +157,8 @@ impl LoadedWorld {
             }
         };
 
-        let renderer = load_renderer(&maps_path, map_id, &sprites)?;
+        let masks = TgamMaskLibrary::default();
+        let renderer = load_renderer(&maps_path, map_id, &sprites, &masks)?;
         let center = renderer.center();
         let camera_controller = CameraController {
             target_position: Vec3::new(center.x, center.y, 0.0),
@@ -175,6 +179,7 @@ impl LoadedWorld {
             camera_controller,
             asset_source,
             group_visibility,
+            masks,
         })
     }
 }
@@ -190,6 +195,7 @@ pub struct VakfuCorePlugin {
     pub camera_controller: CameraController,
     pub asset_source: JarAssetSource,
     pub group_visibility: Option<GroupVisibility>,
+    pub masks: TgamMaskLibrary,
 }
 
 impl Plugin for VakfuCorePlugin {
@@ -214,7 +220,8 @@ impl Plugin for VakfuCorePlugin {
             auto_create_primary_context: false,
             ..default()
         })
-        .init_asset_loader::<TgamLoader>()
+        .register_asset_loader(TgamLoader::new(self.masks.clone()))
+        .insert_resource(self.masks.clone())
         .add_message::<ChangeMapEvent>()
         .insert_resource(self.catalog.clone())
         .insert_resource(self.camera_controller.clone())
@@ -247,6 +254,7 @@ pub fn build_app(window_title: &str, world: LoadedWorld) -> App {
             camera_controller: world.camera_controller,
             asset_source: world.asset_source,
             group_visibility: world.group_visibility,
+            masks: world.masks,
         });
     app
 }

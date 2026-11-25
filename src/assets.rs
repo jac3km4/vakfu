@@ -11,10 +11,12 @@ use std::sync::{Arc, Mutex};
 
 use bevy::asset::io::{AssetReaderError, ErasedAssetReader, VecReader};
 use bevy::asset::{AssetLoader, RenderAssetUsages};
+use bevy::ecs::resource::Resource;
 use bevy::image::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
+use hashbrown::HashMap;
 pub use groups::GroupVisibility;
 pub use light::{LightDef, LightMap, LightingState, PointLight2d};
 pub use map::{
@@ -22,7 +24,7 @@ pub use map::{
     iso_to_screen, screen_to_iso, sorted_altitude_order,
 };
 pub use sprite::{Animation, Frames, MapSpriteDefinition, MapSpriteLibrary};
-pub use tgam::{Tgam, round_up_to_power_of_two};
+pub use tgam::{Tgam, TgamMask, round_up_to_power_of_two};
 use thiserror::Error;
 
 /// Returns whether a zip entry name refers to a map or light chunk.
@@ -33,8 +35,41 @@ pub(crate) fn is_chunk_entry_name(name: &str) -> bool {
     name.trim_matches(|c: char| c.is_numeric() || c == '-') == "_"
 }
 
-#[derive(Debug, Default, bevy::reflect::TypePath)]
-pub struct TgamLoader;
+#[derive(Debug, Clone, bevy::reflect::TypePath)]
+pub struct TgamLoader {
+    masks: TgamMaskLibrary,
+}
+
+impl TgamLoader {
+    /// Creates a loader that records each texture's packed alpha mask.
+    pub fn new(masks: TgamMaskLibrary) -> Self {
+        Self { masks }
+    }
+}
+
+/// Packed TGAM alpha masks, keyed by texture id.
+///
+/// The loader populates this while decoding textures; picking consults it to
+/// mirror `DisplayedScreenElement.fineHitTest`.
+#[derive(Debug, Clone, Default, Resource)]
+pub struct TgamMaskLibrary(Arc<Mutex<HashMap<i32, Arc<TgamMask>>>>);
+
+impl TgamMaskLibrary {
+    /// Records a texture's mask.
+    pub fn insert(&self, texture_id: i32, mask: TgamMask) {
+        if let Ok(mut masks) = self.0.lock() {
+            masks.insert(texture_id, Arc::new(mask));
+        }
+    }
+
+    /// Returns the mask for `texture_id`, if the texture declared one.
+    pub fn get(&self, texture_id: i32) -> Option<Arc<TgamMask>> {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|masks| masks.get(&texture_id).cloned())
+    }
+}
 
 impl AssetLoader for TgamLoader {
     type Asset = Image;
@@ -45,12 +80,17 @@ impl AssetLoader for TgamLoader {
         &self,
         reader: &mut dyn bevy::asset::io::Reader,
         _settings: &Self::Settings,
-        _load_context: &mut bevy::asset::LoadContext<'_>,
+        load_context: &mut bevy::asset::LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
         let (tgam, _) = Tgam::try_read(&bytes, LittleEndian)?;
+        if let Some(mask) = TgamMask::from_tgam(&tgam)
+            && let Some(texture_id) = texture_id_from_path(load_context.path())
+        {
+            self.masks.insert(texture_id, mask);
+        }
         let extent = Extent3d {
             width: tgam.padded_width(),
             height: tgam.padded_height(),
@@ -69,6 +109,14 @@ impl AssetLoader for TgamLoader {
     fn extensions(&self) -> &[&str] {
         &["tgam"]
     }
+}
+
+/// Extracts the numeric texture id from a `gfx/{id}.tgam` asset path.
+fn texture_id_from_path(path: &bevy::asset::AssetPath<'_>) -> Option<i32> {
+    path.path()
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.parse::<i32>().ok())
 }
 
 #[derive(Debug, Clone)]

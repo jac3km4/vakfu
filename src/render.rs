@@ -15,8 +15,8 @@ use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
     Animation, Frames, GroupVisibility, LightDef, LightMap, LightingState, Map, MapChunk,
-    MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, element_hashcode, iso_to_screen,
-    round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
+    MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, TgamMaskLibrary, element_hashcode,
+    iso_to_screen, round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
 };
 use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
@@ -116,6 +116,8 @@ pub struct MapRenderer {
     /// Static light data, kept so edited/moved elements can resolve their cell
     /// lighting like the reference engine does.
     light_map: LightMap,
+    /// Alpha masks decoded from TGAM textures, used for precise picking.
+    masks: TgamMaskLibrary,
 }
 
 /// The definition-independent inputs for placing a sprite.
@@ -272,6 +274,7 @@ impl MapRenderer {
             available_layers,
             cell_altitudes,
             light_map,
+            masks: TgamMaskLibrary::default(),
         }
     }
 
@@ -653,12 +656,89 @@ impl MapRenderer {
         candidates
             .iter()
             .copied()
-            .find(|elem| is_opaque_at_world(elem, wx, wy, &self.sprite_assets, images, elapsed, 8))
-            .or_else(|| {
-                candidates.into_iter().find(|elem| {
-                    is_opaque_at_world(elem, wx, wy, &self.sprite_assets, images, elapsed, 1)
-                })
+            .find(|elem| {
+                self.is_opaque_at_world(elem, wx, wy, images, elapsed, 8)
             })
+            .or_else(|| {
+                candidates
+                    .into_iter()
+                    .find(|elem| self.is_opaque_at_world(elem, wx, wy, images, elapsed, 1))
+            })
+    }
+
+    /// Returns whether `elem` has an opaque texel at the given world position.
+    fn is_opaque_at_world(
+        &self,
+        elem: &Renderable,
+        wx: f32,
+        wy: f32,
+        images: &Assets<Image>,
+        elapsed: Duration,
+        alpha_threshold: u8,
+    ) -> bool {
+        if elem.color.alpha <= 0.01 {
+            return false;
+        }
+        let (rw, rh) = (elem.render_size.x, elem.render_size.y);
+        if rw == 0 || rh == 0 {
+            return false;
+        }
+        let mut u = (wx - elem.position.x) / (rw as f32);
+        let v = (elem.position.y - wy) / (rh as f32);
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+            return false;
+        }
+        if elem.flip_x {
+            u = 1.0 - u;
+        }
+
+        let (min_x, min_y, sub_w, sub_h) = match &elem.animation {
+            Animation::None => (0, 0, elem.texture_size.x, elem.texture_size.y),
+            Animation::Frames(frames) => {
+                let idx = frame_index(frames, elapsed);
+                if let Some([x, y]) = frames.frame_coords(idx) {
+                    (
+                        u32::from(x),
+                        u32::from(y),
+                        u32::from(frames.width()),
+                        u32::from(frames.height()),
+                    )
+                } else {
+                    (0, 0, elem.texture_size.x, elem.texture_size.y)
+                }
+            }
+        };
+        if sub_w == 0 || sub_h == 0 {
+            return false;
+        }
+
+        let px = min_x + (u.clamp(0.0, 0.999_999) * sub_w as f32) as u32;
+        let py = min_y + (v.clamp(0.0, 0.999_999) * sub_h as f32) as u32;
+
+        // `DisplayedScreenElement.fineHitTest` uses the TGAM alpha mask rather
+        // than the RGBA alpha channel.
+        if let Some(mask) = self.masks.get(elem.texture_id) {
+            return mask.contains(px, py);
+        }
+
+        let Some((img_handle, _)) = self.sprite_assets.get(&elem.definition_id) else {
+            return true;
+        };
+        let Some(img) = images.get(img_handle) else {
+            return true;
+        };
+        let Some(data) = img.data.as_ref() else {
+            return true;
+        };
+
+        let img_w = img.width();
+        let img_h = img.height();
+        if px >= img_w || py >= img_h {
+            return false;
+        }
+
+        let alpha_idx = ((py * img_w + px) * 4 + 3) as usize;
+        data.get(alpha_idx).is_some_and(|&a| a >= alpha_threshold)
     }
 
     /// Despawns every sprite entity spawned for this map.
@@ -789,6 +869,7 @@ pub fn load_renderer(
     maps_path: &Path,
     map_id: i32,
     sprites: &MapSpriteLibrary,
+    masks: &TgamMaskLibrary,
 ) -> anyhow::Result<MapRenderer> {
     let map_path = maps_path.join("gfx").join(format!("{map_id}.jar"));
     let light_path = maps_path.join("light").join(format!("{map_id}.jar"));
@@ -816,7 +897,9 @@ pub fn load_renderer(
         LightMap::default()
     };
 
-    Ok(MapRenderer::new(&map, sprites, light_map))
+    let mut renderer = MapRenderer::new(&map, sprites, light_map);
+    renderer.masks = TgamMaskLibrary::clone(masks);
+    Ok(renderer)
 }
 
 #[derive(SystemParam)]
@@ -829,6 +912,7 @@ pub struct LoadMapParams<'w, 's> {
     cameras: Query<'w, 's, &'static mut Transform, With<MainCamera>>,
     pending_load: ResMut<'w, PendingMapLoad>,
     groups: ResMut<'w, GroupVisibilityState>,
+    masks: Res<'w, TgamMaskLibrary>,
 }
 
 pub fn load_map_system(params: LoadMapParams<'_, '_>) {
@@ -841,6 +925,7 @@ pub fn load_map_system(params: LoadMapParams<'_, '_>) {
         mut cameras,
         mut pending_load,
         mut groups,
+        masks,
     } = params;
     if let Some(&ChangeMapEvent(target_map_id)) = events.read().last()
         && pending_load.request(catalog.current_map_id, target_map_id)
@@ -848,7 +933,10 @@ pub fn load_map_system(params: LoadMapParams<'_, '_>) {
         let pool = AsyncComputeTaskPool::get();
         let maps_path = catalog.maps_path.clone();
         let sprites = catalog.sprites.clone();
-        let task = pool.spawn(async move { load_renderer(&maps_path, target_map_id, &sprites) });
+        let masks = (*masks).clone();
+        let task = pool.spawn(async move {
+            load_renderer(&maps_path, target_map_id, &sprites, &masks)
+        });
         pending_load.task = Some((target_map_id, task));
     }
 
@@ -1256,73 +1344,6 @@ fn frame_index(frames: &Frames, elapsed: Duration) -> usize {
     frames.frame_index_at(elapsed)
 }
 
-fn is_opaque_at_world(
-    elem: &Renderable,
-    wx: f32,
-    wy: f32,
-    sprite_assets: &HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
-    images: &Assets<Image>,
-    elapsed: Duration,
-    alpha_threshold: u8,
-) -> bool {
-    if elem.color.alpha <= 0.01 {
-        return false;
-    }
-    let (rw, rh) = (elem.render_size.x, elem.render_size.y);
-    if rw == 0 || rh == 0 {
-        return false;
-    }
-    let mut u = (wx - elem.position.x) / (rw as f32);
-    let v = (elem.position.y - wy) / (rh as f32);
-    if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
-        return false;
-    }
-    if elem.flip_x {
-        u = 1.0 - u;
-    }
-
-    let Some((img_handle, _)) = sprite_assets.get(&elem.definition_id) else {
-        return true;
-    };
-    let Some(img) = images.get(img_handle) else {
-        return true;
-    };
-    let Some(data) = img.data.as_ref() else {
-        return true;
-    };
-
-    let (min_x, min_y, sub_w, sub_h) = match &elem.animation {
-        Animation::None => (0, 0, elem.texture_size.x, elem.texture_size.y),
-        Animation::Frames(frames) => {
-            let idx = frame_index(frames, elapsed);
-            if let Some([x, y]) = frames.frame_coords(idx) {
-                (
-                    u32::from(x),
-                    u32::from(y),
-                    u32::from(frames.width()),
-                    u32::from(frames.height()),
-                )
-            } else {
-                (0, 0, elem.texture_size.x, elem.texture_size.y)
-            }
-        }
-    };
-    if sub_w == 0 || sub_h == 0 {
-        return false;
-    }
-
-    let px = min_x + (u.clamp(0.0, 0.999_999) * sub_w as f32) as u32;
-    let py = min_y + (v.clamp(0.0, 0.999_999) * sub_h as f32) as u32;
-    let img_w = img.width();
-    let img_h = img.height();
-    if px >= img_w || py >= img_h {
-        return false;
-    }
-
-    let alpha_idx = ((py * img_w + px) * 4 + 3) as usize;
-    data.get(alpha_idx).is_some_and(|&a| a >= alpha_threshold)
-}
-
 pub fn premultiplied_tint(color: LinearRgba) -> Color {
     // The texture is already premultiplied, but Bevy's sprite shader also
     // multiplies it by this tint. Tint opacity must attenuate RGB as well.
@@ -1446,6 +1467,7 @@ mod tests {
             available_layers: Vec::new(),
             cell_altitudes: HashMap::new(),
             light_map: LightMap::default(),
+            masks: TgamMaskLibrary::default(),
         }
     }
 
@@ -1481,12 +1503,14 @@ mod tests {
                 available_layers: Vec::new(),
                 cell_altitudes: HashMap::new(),
             light_map: LightMap::default(),
+            masks: TgamMaskLibrary::default(),
             })
             .insert_resource(CameraController::default())
             .insert_resource(PendingMapLoad {
                 task: Some((2, pending_task(&pool))),
             })
             .insert_resource(GroupVisibilityState::default())
+            .insert_resource(TgamMaskLibrary::default())
             .add_systems(Update, load_map_system);
 
         // The last selection wins, including when it is the displayed map.
@@ -1755,6 +1779,7 @@ mod tests {
             available_layers: vec![0],
             cell_altitudes: HashMap::new(),
             light_map: LightMap::default(),
+            masks: TgamMaskLibrary::default(),
         };
         renderer.uid_envelopes.insert(1, elem_top_z.envelope());
         renderer.uid_envelopes.insert(2, elem_solid.envelope());
@@ -1768,6 +1793,20 @@ mod tests {
         // Clicking at bottom-right (wx=18, wy=2): elem_top_z is opaque there -> picks elem_top_z (uid 1)!
         let picked_solid = renderer.pick_at_world(18.0, 2.0, &settings, &images, Duration::ZERO);
         assert_eq!(picked_solid.map(|r| r.uid), Some(1));
+
+        // An opaque TGAM mask overrides the RGBA alpha channel.
+        renderer
+            .masks
+            .insert(1, crate::assets::TgamMask::new(vec![0xFF], 1, 2, 2));
+        let picked_masked = renderer.pick_at_world(2.0, 18.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked_masked.map(|r| r.uid), Some(1));
+
+        // A fully transparent mask hides an otherwise-opaque element.
+        renderer
+            .masks
+            .insert(1, crate::assets::TgamMask::new(vec![0x00], 1, 2, 2));
+        let picked_hidden = renderer.pick_at_world(18.0, 2.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked_hidden.map(|r| r.uid), Some(2));
     }
 
     #[test]
@@ -1785,6 +1824,7 @@ mod tests {
             available_layers: Vec::new(),
             cell_altitudes: HashMap::new(),
             light_map: LightMap::default(),
+            masks: TgamMaskLibrary::default(),
         };
         assert_eq!(renderer.next_altitude_order_at(1, 2), 0);
 

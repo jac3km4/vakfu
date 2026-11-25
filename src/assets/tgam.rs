@@ -11,10 +11,8 @@ pub struct Tgam<'a> {
     /// The underlying pixel data in RGBA format.
     rgba: &'a [u8],
     /// The mask data associated with the image.
-    #[allow(dead_code)]
     mask: &'a [u8],
     /// A value defining how the mask should be resized or mapped.
-    #[allow(dead_code)]
     mask_resize: u8,
 }
 
@@ -23,6 +21,18 @@ impl<'a> Tgam<'a> {
     #[inline]
     pub fn rgba(&self) -> &'a [u8] {
         self.rgba
+    }
+
+    /// Returns the packed alpha mask associated with the image.
+    #[inline]
+    pub fn mask(&self) -> &'a [u8] {
+        self.mask
+    }
+
+    /// Returns the mask resize factor (`1` when the image is not resized).
+    #[inline]
+    pub fn mask_resize(&self) -> u8 {
+        self.mask_resize
     }
 
     /// Returns the width of the image, rounded up to the nearest power of two.
@@ -47,6 +57,55 @@ impl<'a> Tgam<'a> {
     #[inline]
     pub fn physical_height(&self) -> u16 {
         self.height
+    }
+}
+
+/// The packed alpha mask attached to a TGAM texture.
+///
+/// Mirrors `AlphaMask`: bits are MSB-first and each `resize`-sized block maps
+/// to one bit. Used for precise hit-testing (`DisplayedScreenElement.fineHitTest`).
+#[derive(Debug, Clone)]
+pub struct TgamMask {
+    data: Vec<u8>,
+    resize: u8,
+    width: u16,
+    height: u16,
+}
+
+impl TgamMask {
+    /// Builds a mask from raw packed bits.
+    pub fn new(data: Vec<u8>, resize: u8, width: u16, height: u16) -> Self {
+        Self {
+            data,
+            resize: resize.max(1),
+            width,
+            height,
+        }
+    }
+
+    /// Builds a mask from a parsed TGAM, or `None` when the texture has none.
+    pub fn from_tgam(tgam: &Tgam<'_>) -> Option<Self> {
+        if tgam.mask().is_empty() {
+            return None;
+        }
+        Some(Self::new(
+            tgam.mask().to_vec(),
+            tgam.mask_resize(),
+            tgam.physical_width(),
+            tgam.physical_height(),
+        ))
+    }
+
+    /// Returns whether the mask bit at `(x, y)` is set.
+    pub fn contains(&self, x: u32, y: u32) -> bool {
+        if x >= u32::from(self.width) || y >= u32::from(self.height) {
+            return false;
+        }
+        let resize = u32::from(self.resize);
+        let mask_width = u32::from(self.width).div_ceil(resize);
+        let index = (y / resize) * mask_width + (x / resize);
+        let byte = self.data.get((index / 8) as usize).copied().unwrap_or(0);
+        byte & (1 << (7 - (index % 8))) != 0
     }
 }
 
@@ -167,5 +226,48 @@ mod tests {
         bytes.extend_from_slice(&[255u8; 12]);
 
         assert!(Tgam::try_read(&bytes, LittleEndian).is_err());
+    }
+
+    #[test]
+    fn mask_bits_are_msb_first_and_resized() {
+        let mask = TgamMask {
+            data: vec![0b1000_0000, 0b1000_0000],
+            resize: 1,
+            width: 9,
+            height: 1,
+        };
+        assert!(mask.contains(0, 0));
+        assert!(!mask.contains(1, 0));
+        assert!(mask.contains(8, 0));
+        assert!(!mask.contains(9, 0));
+
+        let resized = TgamMask {
+            data: vec![0b1000_0000],
+            resize: 2,
+            width: 4,
+            height: 2,
+        };
+        assert!(resized.contains(0, 0));
+        assert!(resized.contains(1, 1));
+        assert!(!resized.contains(2, 0));
+        assert!(!resized.contains(0, 2));
+    }
+
+    #[test]
+    fn mask_is_built_from_the_tgam_payload() {
+        let mut bytes = Vec::new();
+        bytes.push(0);
+        bytes.extend_from_slice(b"AGT");
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // mask_size
+        bytes.extend_from_slice(&[255u8; 16]);
+        bytes.push(0b1000_0000);
+
+        let (tgam, _) = Tgam::try_read(&bytes, LittleEndian).unwrap();
+        let mask = TgamMask::from_tgam(&tgam).unwrap();
+        assert!(mask.contains(0, 0));
+        assert!(!mask.contains(1, 0));
     }
 }
