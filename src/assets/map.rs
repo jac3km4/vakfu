@@ -243,10 +243,17 @@ impl Rgba {
     }
 }
 
+/// The fixed-pipeline RGB scale (`gColorScale`) the reference engine applies
+/// to element tints.
+///
+/// Folding it into the decoded tint lets Bevy's sprite shader reproduce the
+/// reference output without an extra texture-stage state.
+pub const TINT_SCALE: f32 = 2.0;
+
 /// Decodes a single tint channel: `byte / 255 + 0.5`, scaled by the engine's
-/// `gColorScale` of `2.0` and clamped to non-negative values.
+/// `gColorScale` and clamped to non-negative values.
 fn rgb_to_f32(value: i8) -> f32 {
-    ((value as f32 / 255. + 0.5) * 2.).max(0.)
+    ((value as f32 / 255. + 0.5) * TINT_SCALE).max(0.)
 }
 
 /// Decodes an alpha channel: `byte / 255 + 0.5`, clamped to `[0, 1]`.

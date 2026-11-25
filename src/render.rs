@@ -13,7 +13,7 @@ use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
-    Animation, Frames, LightMap, Map, MapChunk, MapSpriteDefinition, MapSpriteLibrary,
+    Animation, Frames, LightMap, Map, MapChunk, MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE,
     element_hashcode, iso_to_screen, round_up_to_power_of_two, sorted_altitude_order,
 };
 use crate::camera::CameraController;
@@ -935,11 +935,15 @@ fn is_opaque_at_world(
 pub fn premultiplied_tint(color: LinearRgba) -> Color {
     // The texture is already premultiplied, but Bevy's sprite shader also
     // multiplies it by this tint. Tint opacity must attenuate RGB as well.
+    //
+    // The reference renderer clamps the combined tint to `[0, 1]` before the
+    // fixed pipeline applies its `gColorScale` of 2.0, so the folded-in tint
+    // is capped at `TINT_SCALE` rather than 1.0.
     let alpha = color.alpha.clamp(0.0, 1.0);
     Color::linear_rgba(
-        (color.red * alpha).max(0.0),
-        (color.green * alpha).max(0.0),
-        (color.blue * alpha).max(0.0),
+        (color.red * alpha).clamp(0.0, TINT_SCALE),
+        (color.green * alpha).clamp(0.0, TINT_SCALE),
+        (color.blue * alpha).clamp(0.0, TINT_SCALE),
         alpha,
     )
 }
@@ -1090,6 +1094,11 @@ mod tests {
 
         let clamped_low = premultiplied_tint(LinearRgba::new(1.0, 1.0, 1.0, -0.5));
         assert_eq!(clamped_low, Color::linear_rgba(0.0, 0.0, 0.0, 0.0));
+
+        // The reference clamps the tint to [0, 1] before its 2x RGB scale, so
+        // the folded-in tint caps at 2.0 and never goes negative.
+        let clamped_rgb = premultiplied_tint(LinearRgba::new(3.0, 1.0, -1.0, 1.0));
+        assert_eq!(clamped_rgb, Color::linear_rgba(2.0, 1.0, 0.0, 1.0));
     }
 
     #[test]

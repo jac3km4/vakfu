@@ -16,8 +16,8 @@ use byte::TryRead;
 use byte::ctx::LittleEndian;
 pub use light::LightMap;
 pub use map::{
-    Map, MapChunk, MapElementDetails, Rgba, element_hashcode, iso_cell_diamond, iso_to_screen,
-    screen_to_iso, sorted_altitude_order,
+    Map, MapChunk, MapElementDetails, Rgba, TINT_SCALE, element_hashcode, iso_cell_diamond,
+    iso_to_screen, screen_to_iso, sorted_altitude_order,
 };
 pub use sprite::{Animation, Frames, MapSpriteDefinition, MapSpriteLibrary};
 pub use tgam::{Tgam, round_up_to_power_of_two};
