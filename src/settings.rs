@@ -19,6 +19,9 @@ pub struct MapViewSettings {
     /// are present.
     pub visibility_mask: u8,
     pub enable_light: bool,
+    /// Derive the shadow and night-light intensities from the sun colour,
+    /// matching `SunLightModifier.update` / `setLightIntensityFactor`.
+    pub auto_daylight: bool,
     pub lighting: LightingState,
 }
 
@@ -31,6 +34,7 @@ impl Default for MapViewSettings {
             group: 0,
             visibility_mask: 7,
             enable_light: true,
+            auto_daylight: false,
             lighting: LightingState::default(),
         }
     }
@@ -44,6 +48,9 @@ pub fn settings_ui_system(
     mut search_filter: Local<'_, String>,
 ) -> bevy::prelude::Result {
     let mut edited_settings = settings.clone();
+    if edited_settings.auto_daylight {
+        edited_settings.lighting.apply_auto_daylight();
+    }
     egui::Window::new("Settings")
         .movable(false)
         .show(contexts.ctx_mut()?, |ui| {
@@ -122,20 +129,23 @@ pub fn settings_ui_system(
             });
             ui.checkbox(&mut edited_settings.enable_light, "Enable light");
             ui.add_enabled_ui(edited_settings.enable_light, |ui| {
-                ui.add(
-                    egui::Slider::new(
-                        &mut edited_settings.lighting.shadow_intensity,
-                        0.0..=1.0,
-                    )
-                    .text("Shadows"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut edited_settings.lighting.night_light_intensity,
-                        0.0..=1.0,
-                    )
-                    .text("Night lights"),
-                );
+                ui.checkbox(&mut edited_settings.auto_daylight, "Auto daylight");
+                ui.add_enabled_ui(!edited_settings.auto_daylight, |ui| {
+                    ui.add(
+                        egui::Slider::new(
+                            &mut edited_settings.lighting.shadow_intensity,
+                            0.0..=1.0,
+                        )
+                        .text("Shadows"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut edited_settings.lighting.night_light_intensity,
+                            0.0..=1.0,
+                        )
+                        .text("Night lights"),
+                    );
+                });
                 ui.horizontal(|ui| {
                     ui.label("Sun colour");
                     ui.color_edit_button_rgb(&mut edited_settings.lighting.sun_color);

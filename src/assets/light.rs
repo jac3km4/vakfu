@@ -12,6 +12,13 @@ const SHADOW_MIN: f32 = 0.3;
 /// The upper colour bound applied by `ClampLightLitModifier`.
 const LIGHT_MAX: f32 = 1.05;
 
+/// Luminance weights from `SunLightModifier.getDayLightIntensity`.
+const SUN_LUMINANCE_R: f32 = 0.212_671;
+const SUN_LUMINANCE_G: f32 = 0.715_16;
+const SUN_LUMINANCE_B: f32 = 0.072_169;
+/// Quadratic coefficient from `SunLightModifier.getGlobalLight`.
+const GLOBAL_LIGHT_CURVE: f32 = 2.318_223;
+
 /// The per-cell static lighting definition, mirroring `CellLightDef`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LightDef {
@@ -87,7 +94,8 @@ pub struct LightingState {
     pub shadow_intensity: f32,
     /// `m_nightLightIntensityFactor`; `1.0` is full night lights.
     pub night_light_intensity: f32,
-    /// `SunLightModifier` colour, applied to outdoor-lit cells.
+    /// `SunLightModifier` colour. It multiplies every lit object; the
+    /// per-cell `allowOutdoorLighting` flag is not consulted.
     pub sun_color: [f32; 3],
     /// Dynamic additive point lights (normally empty for static maps).
     pub point_lights: Vec<PointLight2d>,
@@ -105,6 +113,33 @@ impl Default for LightingState {
 }
 
 impl LightingState {
+    /// The sun luminance used by `SunLightModifier.getDayLightIntensity`.
+    pub fn day_light_intensity(&self) -> f32 {
+        self.sun_color[0] * SUN_LUMINANCE_R
+            + self.sun_color[1] * SUN_LUMINANCE_G
+            + self.sun_color[2] * SUN_LUMINANCE_B
+    }
+
+    /// The combined day/night factor from `SunLightModifier.getGlobalLight`.
+    ///
+    /// Positive values drive `m_shadowIntensityFactor`; negative values drive
+    /// `m_nightLightIntensityFactor`.
+    pub fn global_light(&self) -> f32 {
+        let intensity = self.day_light_intensity();
+        GLOBAL_LIGHT_CURVE * intensity * intensity + 1.0 - GLOBAL_LIGHT_CURVE
+    }
+
+    /// Applies `IsoSceneLightManager.setLightIntensityFactor(float)`.
+    ///
+    /// The reference calls this from `SunLightModifier.update`, so shadow and
+    /// night-light intensity follow the sun colour instead of being set
+    /// independently.
+    pub fn apply_auto_daylight(&mut self) {
+        let global = self.global_light();
+        self.shadow_intensity = if global > 0.001 { global } else { 0.0 };
+        self.night_light_intensity = if global < -0.001 { -global } else { 0.0 };
+    }
+
     /// Computes the lit colour of a static cell, mirroring the modifier order
     /// installed by `IsoSceneLightManager.reset`:
     ///
@@ -493,6 +528,33 @@ mod tests {
         // light-map multiply.
         assert_close(state.shade(&outdoor), [0.5, 1.0, 0.3]);
         assert_close(state.shade(&indoor), [0.5, 1.0, 0.3]);
+    }
+
+    #[test]
+    fn auto_daylight_follows_sun_luminance() {
+        // White sun: full daytime shadows and no night lights.
+        let mut day = LightingState::default();
+        day.apply_auto_daylight();
+        assert!((day.shadow_intensity - 1.0).abs() < 1e-6);
+        assert_eq!(day.night_light_intensity, 0.0);
+
+        // Black sun: no shadows and the full negative intensity becomes night.
+        let mut night = LightingState {
+            sun_color: [0.0; 3],
+            ..LightingState::default()
+        };
+        night.apply_auto_daylight();
+        assert_eq!(night.shadow_intensity, 0.0);
+        assert!((night.night_light_intensity - (GLOBAL_LIGHT_CURVE - 1.0)).abs() < 1e-6);
+
+        // Mid grey is already dark enough to activate the night lights.
+        let mut mid = LightingState {
+            sun_color: [0.5; 3],
+            ..LightingState::default()
+        };
+        mid.apply_auto_daylight();
+        assert_eq!(mid.shadow_intensity, 0.0);
+        assert!(mid.night_light_intensity > 0.0);
     }
 
     #[test]
