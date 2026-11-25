@@ -210,6 +210,7 @@ impl MapRenderer {
                     animation: def.animation(),
                     group: group.key(),
                     layer: group.layer(),
+                    visibility_mask: def.visibility_mask(),
 
                     id: None,
                 };
@@ -531,6 +532,7 @@ impl MapRenderer {
             animation: def.animation(),
             group,
             layer,
+            visibility_mask: def.visibility_mask(),
             id: None,
         }
     }
@@ -623,6 +625,7 @@ impl MapRenderer {
             .filter(|elem| {
                 (!settings.layer_filter_on || settings.layer == elem.layer)
                     && (!settings.group_filter_on || settings.group == elem.group / 1000)
+                    && visibility_mask_allows(elem.visibility_mask, settings.visibility_mask)
             })
             .collect();
         candidates.sort_by(|a, b| b.position.z.total_cmp(&a.position.z));
@@ -683,6 +686,8 @@ pub struct Renderable {
     pub animation: Animation,
     pub group: i32,
     pub layer: u8,
+    /// Visibility-mask bits this element requires to be shown.
+    pub visibility_mask: u8,
 
     pub id: Option<Entity>,
 }
@@ -900,6 +905,9 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
         if settings.group_filter_on && settings.group != elem.group / 1000 {
             continue;
         }
+        if !visibility_mask_allows(elem.visibility_mask, settings.visibility_mask) {
+            continue;
+        }
 
         let entity = match elem.id {
             Some(id) if commands.get_entity(id).is_ok() => {
@@ -1037,6 +1045,12 @@ fn render(
     }
 
     entity.id()
+}
+
+/// Mirrors `DisplayedScreenElement.checkVisibilityMask`: the reference shows an
+/// element when all of its own mask bits are present in the requested LOD mask.
+fn visibility_mask_allows(element_mask: u8, requested: u8) -> bool {
+    element_mask & requested == element_mask
 }
 
 fn camera_bounds(camera: &Camera, transform: &GlobalTransform) -> Option<AABB<(f32, f32)>> {
@@ -1237,6 +1251,7 @@ mod tests {
             animation: Animation::None,
             group: 0,
             layer: 0,
+            visibility_mask: 0,
             id: None,
         }
     }
@@ -1384,6 +1399,23 @@ mod tests {
     }
 
     #[test]
+    fn visibility_mask_requires_all_element_bits() {
+        // Mirrors `DisplayedScreenElement.checkVisibilityMask`.
+        assert!(visibility_mask_allows(1, 1));
+        assert!(visibility_mask_allows(1, 3));
+        assert!(visibility_mask_allows(3, 3));
+        assert!(visibility_mask_allows(3, 7));
+        assert!(visibility_mask_allows(7, 7));
+
+        assert!(!visibility_mask_allows(3, 1));
+        assert!(!visibility_mask_allows(7, 3));
+
+        // Elements without a mask are always visible.
+        assert!(visibility_mask_allows(0, 0));
+        assert!(visibility_mask_allows(0, 1));
+    }
+
+    #[test]
     fn test_frame_index_calculations() {
         let frames = Frames::new_for_test(300, vec![100, 100, 100]);
         assert_eq!(frame_index(&frames, Duration::from_millis(0)), 0);
@@ -1479,6 +1511,7 @@ mod tests {
             animation: Animation::None,
             group: 0,
             layer: 0,
+            visibility_mask: 0,
             id: None,
         };
 
@@ -1505,6 +1538,7 @@ mod tests {
             animation: Animation::None,
             group: 0,
             layer: 0,
+            visibility_mask: 0,
             id: None,
         };
 

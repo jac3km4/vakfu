@@ -34,7 +34,6 @@ pub struct MapSpriteDefinition {
     #[allow(dead_code)]
     visual_height: u8,
     /// A bitmask controlling the visibility state under specific views.
-    #[allow(dead_code)]
     visibility_mask: u8,
     /// A bitmask controlling export rules.
     export_mask: u8,
@@ -84,6 +83,15 @@ impl MapSpriteDefinition {
     /// (`(EXPORT_MASK & exportMask) == 0`); they are editor-only helpers.
     pub fn export_mask(&self) -> u8 {
         self.export_mask
+    }
+
+    /// Returns the visibility mask used for level-of-detail culling.
+    ///
+    /// The reference shows an element when all of its mask bits are present in
+    /// the requested mask (`(elementMask & mask) == elementMask`). The LOD
+    /// masks are `1` (minimum), `3` (average) and `7` (maximum).
+    pub fn visibility_mask(&self) -> u8 {
+        self.visibility_mask
     }
 
     /// Returns the sampled texture rectangle dimensions `(width, height)`.
@@ -421,6 +429,7 @@ mod tests {
         assert_eq!(definition.size(), (60, 40));
         assert_eq!(definition.texture_id(), 900);
         assert_eq!(definition.export_mask(), 0x01);
+        assert_eq!(definition.visibility_mask(), 0x07);
         assert!(matches!(definition.animation(), Animation::None));
 
         let flags = definition.flags();

@@ -13,6 +13,11 @@ pub struct MapViewSettings {
     pub layer: u8,
     pub group_filter_on: bool,
     pub group: i32,
+    /// Visibility-mask bits requested from the map, mirroring
+    /// `DisplayedScreenWorld.getLODMask`: `1` = minimum, `3` = average and
+    /// `7` = maximum detail. An element is shown when all of its own mask bits
+    /// are present.
+    pub visibility_mask: u8,
     pub enable_light: bool,
     pub lighting: LightingState,
 }
@@ -24,6 +29,7 @@ impl Default for MapViewSettings {
             layer: 0,
             group_filter_on: false,
             group: 0,
+            visibility_mask: 7,
             enable_light: true,
             lighting: LightingState::default(),
         }
@@ -107,6 +113,12 @@ pub fn settings_ui_system(
                     edited_settings.group_filter_on,
                     egui::Slider::new(&mut edited_settings.group, -1..=1),
                 );
+            });
+            ui.horizontal(|ui| {
+                ui.label("LOD:");
+                ui.selectable_value(&mut edited_settings.visibility_mask, 7, "Max");
+                ui.selectable_value(&mut edited_settings.visibility_mask, 3, "Avg");
+                ui.selectable_value(&mut edited_settings.visibility_mask, 1, "Min");
             });
             ui.checkbox(&mut edited_settings.enable_light, "Enable light");
             ui.add_enabled_ui(edited_settings.enable_light, |ui| {

@@ -1715,6 +1715,7 @@ mod tests {
             animation: Animation::None,
             group: 0,
             layer: 0,
+            visibility_mask: 0,
             id: None,
         };
         renderer.insert_element(initial.clone());
