@@ -34,6 +34,18 @@ const Z_MARGIN: f32 = 25.0;
 const Z_STEP: f32 = 0.01;
 const Z_MIDPOINT: f32 = (Z_MIN + Z_MAX) * 0.5;
 
+/// Element definition ids animated by the reference `Sea` system
+/// (`Sea.WATER_ELEMENTS`).
+const WATER_ELEMENTS: [i32; 10] = [
+    10208, 11138, 10036, 10211, 17702, 17704, 17712, 17713, 17755, 17756,
+];
+/// `Sea.m_amplitude`.
+const WATER_AMPLITUDE: f32 = 0.001;
+/// `Sea.m_speed`.
+const WATER_SPEED: f32 = 2.0;
+/// `Sea.m_width`.
+const WATER_WIDTH: f32 = 10.0;
+
 /// One element's current Z, uid and horizontal envelope, used when re-spreading.
 type ZSortEntry = (f32, u64, AABB<(f32, f32)>);
 
@@ -749,6 +761,14 @@ impl RTreeObject for Renderable {
 #[derive(Component)]
 pub struct MapSprite;
 
+/// Marks a map element that the reference `Sea` system scales sinusoidally.
+/// The cell coordinates drive the wave phase, matching `Sea.update`.
+#[derive(Component)]
+pub struct WaterElement {
+    cell_x: f32,
+    cell_y: f32,
+}
+
 #[derive(Component)]
 pub struct AnimationState {
     frames: Arc<Frames>,
@@ -1005,6 +1025,40 @@ pub fn animation_system(
     }
 }
 
+/// Returns whether `id` is one of the reference `Sea.WATER_ELEMENTS`.
+fn is_water_element(id: i32) -> bool {
+    WATER_ELEMENTS.contains(&id)
+}
+
+/// The scale factor `Sea.update` applies to a water element.
+///
+/// The reference accumulates elapsed milliseconds and uses
+/// `distance + speed * position / 1000`, which is equivalent to
+/// `distance + speed * elapsed_secs`.
+fn water_scale(cell_x: f32, cell_y: f32, elapsed_secs: f32) -> f32 {
+    let distance = (cell_x * cell_x + cell_y * cell_y).sqrt() + WATER_SPEED * elapsed_secs;
+    let mut amplitude = WATER_AMPLITUDE * (std::f32::consts::TAU * distance / WATER_WIDTH).sin();
+    if amplitude < 0.0 {
+        amplitude *= 0.2;
+    }
+    1.0 + amplitude
+}
+
+/// Applies the reference `Sea` wave to water elements.
+pub fn sea_system(
+    time: Res<'_, Time>,
+    mut query: Query<'_, '_, (&WaterElement, &mut Transform, &Visibility)>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (water, mut transform, visibility) in &mut query {
+        // `Sea.update` only touches visible elements.
+        if *visibility == Visibility::Hidden {
+            continue;
+        }
+        transform.scale = Vec3::splat(water_scale(water.cell_x, water.cell_y, elapsed));
+    }
+}
+
 fn render(
     commands: &mut Commands<'_, '_>,
     assets: &Res<'_, AssetServer>,
@@ -1041,6 +1095,13 @@ fn render(
     if let Animation::Frames(frames) = &renderable.animation {
         entity.insert(AnimationState {
             frames: frames.clone(),
+        });
+    }
+
+    if is_water_element(renderable.definition_id) {
+        entity.insert(WaterElement {
+            cell_x: renderable.cell_x as f32,
+            cell_y: renderable.cell_y as f32,
         });
     }
 
@@ -1413,6 +1474,22 @@ mod tests {
         // Elements without a mask are always visible.
         assert!(visibility_mask_allows(0, 0));
         assert!(visibility_mask_allows(0, 1));
+    }
+
+    #[test]
+    fn sea_wave_scales_water_elements_like_the_reference() {
+        assert!(is_water_element(10208));
+        assert!(!is_water_element(1));
+
+        // At the wave origin the sine is zero, so the scale is exactly 1.
+        assert!((water_scale(0.0, 0.0, 0.0) - 1.0).abs() < 1e-6);
+        // A quarter wavelength of distance produces the full positive amplitude.
+        assert!((water_scale(WATER_WIDTH / 4.0, 0.0, 0.0) - 1.001).abs() < 1e-6);
+        // Elapsed time advances the phase at `m_speed` cells per second.
+        let quarter_time = (WATER_WIDTH / 4.0) / WATER_SPEED;
+        assert!((water_scale(0.0, 0.0, quarter_time) - 1.001).abs() < 1e-6);
+        // At three quarters the negative lobe is damped to a fifth.
+        assert!((water_scale(WATER_WIDTH * 0.75, 0.0, 0.0) - 0.9998).abs() < 1e-6);
     }
 
     #[test]
