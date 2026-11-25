@@ -54,8 +54,11 @@ pub struct MapRenderer {
     rtree: RTree<Renderable>,
     uid_envelopes: HashMap<u64, AABB<(f32, f32)>>,
     next_uid: u64,
-    last_seen: HashMap<Entity, u64>,
-    spare_seen: HashMap<Entity, u64>,
+    /// Entities shown in the previous frame; used to hide those that leave the view.
+    visible: HashSet<Entity>,
+    /// Reused allocation for the current frame's visible set.
+    spare_visible: HashSet<Entity>,
+    /// Entities awaiting an explicit despawn (element removal or map switch).
     pending_despawns: Vec<Entity>,
     sprite_assets: HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
     center: Vec2,
@@ -207,8 +210,8 @@ impl MapRenderer {
             rtree: RTree::bulk_load(renderables),
             uid_envelopes,
             next_uid,
-            last_seen: HashMap::new(),
-            spare_seen: HashMap::new(),
+            visible: HashSet::new(),
+            spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
             sprite_assets: HashMap::new(),
             center,
@@ -433,7 +436,8 @@ impl MapRenderer {
         let removed = self.rtree.remove(&target)?;
         self.unregister_altitude((removed.cell_x, removed.cell_y), removed.altitude_order);
         if let Some(entity) = removed.id {
-            self.last_seen.remove(&entity);
+            self.visible.remove(&entity);
+            self.spare_visible.remove(&entity);
             self.pending_despawns.push(entity);
         }
         Some(removed)
@@ -501,14 +505,25 @@ impl MapRenderer {
             })
     }
 
-    pub fn despawn_visible(&mut self, commands: &mut Commands<'_, '_>) {
-        let mut entities: Vec<Entity> = self.last_seen.drain().map(|(entity, _)| entity).collect();
-        entities.append(&mut self.pending_despawns);
-        for entity in entities {
+    /// Despawns every sprite entity spawned for this map.
+    ///
+    /// Off-screen sprites are hidden rather than despawned, so map switches and
+    /// teardown must walk the whole tree rather than just the visible set.
+    pub fn despawn_all(&mut self, commands: &mut Commands<'_, '_>) {
+        for elem in &self.rtree {
+            if let Some(entity) = elem.id
+                && commands.get_entity(entity).is_ok()
+            {
+                commands.entity(entity).despawn();
+            }
+        }
+        for entity in self.pending_despawns.drain(..) {
             if commands.get_entity(entity).is_ok() {
                 commands.entity(entity).despawn();
             }
         }
+        self.visible.clear();
+        self.spare_visible.clear();
     }
 }
 
@@ -642,7 +657,7 @@ pub fn load_map_system(
         pending_load.task = None;
         match result {
             Ok(new_renderer) => {
-                render_state.despawn_visible(&mut commands);
+                render_state.despawn_all(&mut commands);
                 let center = new_renderer.center();
                 camera_controller.current_position = Vec3::new(center.x, center.y, 0.0);
                 camera_controller.target_position = Vec3::new(center.x, center.y, 0.0);
@@ -669,7 +684,16 @@ pub struct RenderParams<'w, 's> {
     atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     render_state: ResMut<'w, MapRenderer>,
     settings: Res<'w, MapViewSettings>,
-    sprites: Query<'w, 's, (&'static mut Sprite, &'static mut Transform), Without<Camera>>,
+    sprites: Query<
+        'w,
+        's,
+        (
+            &'static mut Sprite,
+            &'static mut Transform,
+            &'static mut Visibility,
+        ),
+        Without<Camera>,
+    >,
 }
 
 pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
@@ -708,9 +732,8 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     let sync_existing = settings.is_changed() || render_state.is_changed();
     let MapRenderer {
         rtree,
-        uid_envelopes,
-        last_seen,
-        spare_seen: seen,
+        visible,
+        spare_visible: seen,
         sprite_assets,
         ..
     } = &mut *render_state;
@@ -726,7 +749,14 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
 
         let entity = match elem.id {
             Some(id) if commands.get_entity(id).is_ok() => {
-                if sync_existing && let Ok((mut sprite, mut elem_transform)) = sprites.get_mut(id) {
+                // Re-sync a sprite that re-enters the view even when nothing
+                // else changed, since its properties may have been edited
+                // while it was hidden.
+                let was_visible = visible.contains(&id);
+                if (sync_existing || !was_visible)
+                    && let Ok((mut sprite, mut elem_transform, mut visibility)) =
+                        sprites.get_mut(id)
+                {
                     let active_color = if settings.enable_light {
                         elem.color_tinted
                     } else {
@@ -739,6 +769,7 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
                     if elem_transform.translation != elem.position {
                         elem_transform.translation = elem.position;
                     }
+                    visibility.set_if_neq(Visibility::Inherited);
                 }
                 id
             }
@@ -755,37 +786,35 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
                 entity
             }
         };
-        seen.insert(entity, elem.uid);
+        seen.insert(entity);
     }
 
-    // Despawn elements that left the view and clear their stale entity ids so
-    // they never point at a recycled slot.
-    for (entity, uid) in last_seen.iter() {
-        if seen.contains_key(entity) {
+    // Hide sprites that left the view instead of despawning them. Keeping the
+    // entities alive avoids per-pan archetype churn and lets Bevy skip them
+    // entirely while hidden.
+    for entity in visible.iter() {
+        if seen.contains(entity) {
             continue;
         }
-        if let Some(&env) = uid_envelopes.get(uid)
-            && let Some(elem) = rtree
-                .locate_in_envelope_intersecting_mut(env)
-                .find(|r| r.uid == *uid)
-        {
-            elem.id = None;
-        }
-        if commands.get_entity(*entity).is_ok() {
-            commands.entity(*entity).despawn();
+        if let Ok((_, _, mut visibility)) = sprites.get_mut(*entity) {
+            visibility.set_if_neq(Visibility::Hidden);
         }
     }
 
-    mem::swap(last_seen, seen);
+    mem::swap(visible, seen);
 
     Ok(())
 }
 
 pub fn animation_system(
     time: Res<'_, Time>,
-    mut query: Query<'_, '_, (&AnimationState, &mut Sprite)>,
+    mut query: Query<'_, '_, (&AnimationState, &mut Sprite, &Visibility)>,
 ) {
-    for (state, mut sprite) in &mut query {
+    for (state, mut sprite, visibility) in &mut query {
+        // Off-screen sprites are hidden, so skip their frame bookkeeping too.
+        if *visibility == Visibility::Hidden {
+            continue;
+        }
         let index = frame_index(&state.frames, time.elapsed());
         if let Some(atlas) = sprite.texture_atlas.as_mut()
             && atlas.index != index
@@ -823,6 +852,7 @@ fn render(
         sprite,
         Anchor::TOP_LEFT,
         Transform::from_translation(renderable.position),
+        Visibility::Inherited,
     ));
 
     if let Animation::Frames(frames) = &renderable.animation {
@@ -1032,8 +1062,8 @@ mod tests {
                 rtree: RTree::new(),
                 uid_envelopes: HashMap::new(),
                 next_uid: 1,
-                last_seen: HashMap::new(),
-                spare_seen: HashMap::new(),
+                visible: HashSet::new(),
+                spare_visible: HashSet::new(),
                 pending_despawns: Vec::new(),
                 sprite_assets: HashMap::new(),
                 center: Vec2::ZERO,
@@ -1196,8 +1226,8 @@ mod tests {
             rtree: RTree::bulk_load(vec![elem_top_z.clone(), elem_solid.clone()]),
             uid_envelopes: HashMap::new(),
             next_uid: 3,
-            last_seen: HashMap::new(),
-            spare_seen: HashMap::new(),
+            visible: HashSet::new(),
+            spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
             sprite_assets,
             center: Vec2::ZERO,
@@ -1225,8 +1255,8 @@ mod tests {
             rtree: RTree::new(),
             uid_envelopes: HashMap::new(),
             next_uid: 1,
-            last_seen: HashMap::new(),
-            spare_seen: HashMap::new(),
+            visible: HashSet::new(),
+            spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
             sprite_assets: HashMap::new(),
             center: Vec2::ZERO,
@@ -1308,8 +1338,8 @@ mod tests {
             rtree: RTree::bulk_load(vec![elem1, elem2]),
             uid_envelopes: HashMap::new(),
             next_uid: 3,
-            last_seen: HashMap::new(),
-            spare_seen: HashMap::new(),
+            visible: HashSet::new(),
+            spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
             sprite_assets: HashMap::new(),
             center: Vec2::ZERO,
