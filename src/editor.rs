@@ -1716,6 +1716,7 @@ mod tests {
             group: 0,
             layer: 0,
             visibility_mask: 0,
+            group_alpha: 1.0,
             id: None,
         };
         renderer.insert_element(initial.clone());

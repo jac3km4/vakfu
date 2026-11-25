@@ -230,6 +230,7 @@ impl MapRenderer {
                     group: group.key(),
                     layer: group.layer(),
                     visibility_mask: def.visibility_mask(),
+                    group_alpha: 1.0,
 
                     id: None,
                 };
@@ -552,6 +553,7 @@ impl MapRenderer {
             group,
             layer,
             visibility_mask: def.visibility_mask(),
+            group_alpha: 1.0,
             id: None,
         }
     }
@@ -707,6 +709,8 @@ pub struct Renderable {
     pub layer: u8,
     /// Visibility-mask bits this element requires to be shown.
     pub visibility_mask: u8,
+    /// Current group fade multiplier (`1.0` visible, `0.0` hidden).
+    pub group_alpha: f32,
 
     pub id: Option<Entity>,
 }
@@ -950,15 +954,10 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
 
     // The reference keys group visibility on the group under the camera (the
     // player's walkable cell). Use the topmost element at the camera centre.
-    let group_from = groups.0.as_ref().map(|_| {
-        let (cell_x, cell_y) = screen_to_iso(transform.translation.x, transform.translation.y, 0);
-        let point = AABB::from_point((transform.translation.x, transform.translation.y));
-        rtree
-            .locate_in_envelope_intersecting(point)
-            .filter(|elem| elem.cell_x == cell_x && elem.cell_y == cell_y)
-            .max_by(|a, b| a.position.z.total_cmp(&b.position.z))
-            .map_or(0, |elem| elem.group)
-    });
+    let group_from = groups
+        .0
+        .as_ref()
+        .map(|_| camera_group(rtree, transform.translation.truncate()));
 
     for elem in rtree.locate_in_envelope_intersecting_mut(aabb) {
         if settings.layer_filter_on && settings.layer != elem.layer {
@@ -986,11 +985,12 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
                     && let Ok((mut sprite, mut elem_transform, mut visibility)) =
                         sprites.get_mut(id)
                 {
-                    let active_color = if settings.enable_light {
+                    let mut active_color = if settings.enable_light {
                         elem.color_tinted
                     } else {
                         elem.color
                     };
+                    active_color.alpha *= elem.group_alpha;
                     let color = premultiplied_tint(active_color);
                     if sprite.color != color {
                         sprite.color = color;
@@ -1106,6 +1106,58 @@ pub fn sea_system(
     }
 }
 
+/// Moves `current` toward `target` at the reference
+/// `GroupLayerManager.Fader` speed of `1/300` per millisecond.
+fn fade_alpha(current: f32, target: f32, delta_secs: f32) -> f32 {
+    let step = (delta_secs * 1000.0 / 300.0).clamp(0.0, 1.0);
+    if target > current {
+        (current + step).min(target)
+    } else {
+        (current - step).max(target)
+    }
+}
+
+/// Fades elements when their group becomes visible or hidden.
+///
+/// `GroupLayerManager` keys this on the group under the camera; elements with
+/// a hidden group fade to zero alpha over `FADE_TIME` (300 ms).
+pub fn group_fade_system(
+    time: Res<'_, Time>,
+    cameras: Query<'_, '_, &Transform, With<MainCamera>>,
+    groups: Res<'_, GroupVisibilityState>,
+    mut render_state: ResMut<'_, MapRenderer>,
+) {
+    let Some(visibility) = groups.0.as_ref() else {
+        return;
+    };
+    let Ok(transform) = cameras.single() else {
+        return;
+    };
+
+    let from = camera_group(&render_state.rtree, transform.translation.truncate());
+    let needs_update = render_state.rtree.iter().any(|elem| {
+        let target = if visibility.layer_visible(from, elem.group) {
+            1.0
+        } else {
+            0.0
+        };
+        elem.group_alpha != target
+    });
+    if !needs_update {
+        return;
+    }
+
+    let delta = time.delta_secs();
+    for elem in &mut render_state.rtree {
+        let target = if visibility.layer_visible(from, elem.group) {
+            1.0
+        } else {
+            0.0
+        };
+        elem.group_alpha = fade_alpha(elem.group_alpha, target, delta);
+    }
+}
+
 fn render(
     commands: &mut Commands<'_, '_>,
     assets: &Res<'_, AssetServer>,
@@ -1122,11 +1174,12 @@ fn render(
         });
 
     let mut sprite = Sprite::from_atlas_image(img.clone(), layout.clone().into());
-    let active_color = if enable_light {
+    let mut active_color = if enable_light {
         renderable.color_tinted
     } else {
         renderable.color
     };
+    active_color.alpha *= renderable.group_alpha;
     sprite.color = premultiplied_tint(active_color);
     sprite.flip_x = renderable.flip_x;
     sprite.custom_size = Some(renderable.render_size.as_vec2());
@@ -1153,6 +1206,17 @@ fn render(
     }
 
     entity.id()
+}
+
+/// Returns the group key of the topmost element at the camera centre.
+fn camera_group(rtree: &RTree<Renderable>, center: Vec2) -> i32 {
+    let (cell_x, cell_y) = screen_to_iso(center.x, center.y, 0);
+    let point = AABB::from_point((center.x, center.y));
+    rtree
+        .locate_in_envelope_intersecting(point)
+        .filter(|elem| elem.cell_x == cell_x && elem.cell_y == cell_y)
+        .max_by(|a, b| a.position.z.total_cmp(&b.position.z))
+        .map_or(0, |elem| elem.group)
 }
 
 /// Mirrors `DisplayedScreenElement.checkVisibilityMask`: the reference shows an
@@ -1360,6 +1424,7 @@ mod tests {
             group: 0,
             layer: 0,
             visibility_mask: 0,
+            group_alpha: 1.0,
             id: None,
         }
     }
@@ -1508,6 +1573,14 @@ mod tests {
     }
 
     #[test]
+    fn group_fade_moves_at_reference_speed() {
+        assert!((fade_alpha(1.0, 0.0, 0.15) - 0.5).abs() < 1e-6);
+        assert_eq!(fade_alpha(0.0, 1.0, 0.3), 1.0);
+        assert_eq!(fade_alpha(0.5, 0.0, 0.0), 0.5);
+        assert!((fade_alpha(0.0, 1.0, 0.001) - (0.001 * 1000.0 / 300.0)).abs() < 1e-6);
+    }
+
+    #[test]
     fn visibility_mask_requires_all_element_bits() {
         // Mirrors `DisplayedScreenElement.checkVisibilityMask`.
         assert!(visibility_mask_allows(1, 1));
@@ -1637,6 +1710,7 @@ mod tests {
             group: 0,
             layer: 0,
             visibility_mask: 0,
+            group_alpha: 1.0,
             id: None,
         };
 
@@ -1664,6 +1738,7 @@ mod tests {
             group: 0,
             layer: 0,
             visibility_mask: 0,
+            group_alpha: 1.0,
             id: None,
         };
 
