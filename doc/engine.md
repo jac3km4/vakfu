@@ -84,27 +84,27 @@ Each element has:
 
 ## Rust Implementation Comparison
 
-The current Rust implementation provides basic map loading and rendering but lacks several features of the target engine.
-
 ### Implemented Features
-- Loading maps from `.jar` files
-- Loading element definitions (`elements.lib` inside `data.jar`)
-- Rendering map sprites with basic depth sorting
-- Applying element colors
-- Applying basic sprite properties (origin offsets, flip)
-- Simple animations
+- Loading maps, light maps and element definitions from `.jar` files
+- Rendering map sprites with reference depth sorting (`LayerOrder` hash codes)
+- Applying element colours, including alpha-only and gradient colour tags
+- Applying sprite properties (origin offsets, flip, before-mobile ordering, export mask)
+- Animated sprites with frame lookup and per-element phase offsets
+- Lighting: ambient/shadows/night lights, sun colour, automatic day/night intensity from sun luminance, and dynamic point lights
+- LOD visibility masks (`1` / `3` / `7`)
+- Water element animation (`Sea.WATER_ELEMENTS`)
+- Indoor/outdoor group visibility from `groups.lib` with 300 ms fades
+- Picking using the TGAM alpha mask, with an RGBA-alpha fallback
+- Premultiplied-alpha blending and the reference `gColorScale` tint
 
 ### Missing Features
 
-1. **Occluders and Clipping**: The target engine has an optimization using occluders and clipping flags. This is completely missing in Rust.
-2. **Hidden Element / HighLight Fades**: The target engine supports applying colors based on highlight fades and layer fades.
-3. **Lighting**: The target engine supports applying specific lighting colors per sprite, substituting material properties dynamically.
-4. **Hit Testing / Masking**: The target engine provides precise hit testing, evaluating exact pixel locations against alpha masks. Texture mask parsing in Rust currently extracts the mask, but it is not used in rendering or interactions.
-5. **Slope / Height Processing**: The target engine computes specific transforms when highlighting based on the slope mask and visual height.
-6. **Ground Sound Type**: Extracted in the target engine, missing in Rust.
-7. **Shaders**: The target engine can specify a shader ID per element. The Rust version ignores this flag.
-8. **Visibility Masks**: The target engine supports elements with visibility masks.
-9. **Render Tree and Stencils**: The target engine uses a specialized rendering tree structure for rendering ordering, multi-cell elements, and handling mask overlays using Stencil buffers, missing in Rust.
-10. **Camera Masking**: The target engine supports tracking elements and applying camera mask keys and group limits based on the camera view.
-11. **Picking**: The target engine implements picking using hit testing for elements selection which is unimplemented in the Rust version.
-12. **Daylight and Scripted Lighting**: The target engine features managers for day percentage color gradients and scripted modifiers to programmatically mutate scene colors in real-time.
+1. **Occluders and Clipping**: The target engine cuts holes around occluded entities and clips sprites; this is not implemented.
+2. **Hidden Element / HighLight Fades**: Per-element highlight fades and hover fades are not implemented (group/layer fades are).
+3. **Slope / Height Processing**: Highlight transforms based on the slope mask and visual height.
+4. **Ground Sound Type**: Extracted during parsing but unused.
+5. **Shaders**: The per-element shader id is ignored.
+6. **Render Tree and Stencils**: Multi-cell entity sorting, stencil mask overlays, and the specialised render tree.
+7. **Scripted Lighting / Day-Percentage Gradients**: The `dayLight` definition tables and scripted `LitSceneModifier`s are not loaded; the viewer exposes sun colour, shadows and night lights directly.
+8. **Dynamic Entities, Particles and Ambiance**: `.anm` elements, particle systems, weather/cloud effects, parallax and global colour grading.
+9. **Async Chunk Streaming**: The viewer loads a whole map jar per map rather than streaming chunks around the camera.
