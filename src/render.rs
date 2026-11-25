@@ -20,7 +20,7 @@ use crate::settings::MapViewSettings;
 #[derive(Message, Debug, Clone, Copy)]
 pub struct ChangeMapEvent(pub i32);
 
-#[derive(Resource)]
+#[derive(Clone, Resource)]
 pub struct MapCatalog {
     pub maps_path: std::path::PathBuf,
     pub sprites: Arc<MapSpriteLibrary>,
@@ -52,8 +52,8 @@ pub struct MapRenderer {
     rtree: RTree<Renderable>,
     uid_envelopes: HashMap<u64, AABB<(f32, f32)>>,
     next_uid: u64,
-    last_seen: HashSet<Entity>,
-    spare_seen: HashSet<Entity>,
+    last_seen: HashMap<Entity, u64>,
+    spare_seen: HashMap<Entity, u64>,
     pending_despawns: Vec<Entity>,
     sprite_assets: HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
     center: Vec2,
@@ -180,8 +180,8 @@ impl MapRenderer {
             rtree: RTree::bulk_load(renderables),
             uid_envelopes,
             next_uid,
-            last_seen: HashSet::new(),
-            spare_seen: HashSet::new(),
+            last_seen: HashMap::new(),
+            spare_seen: HashMap::new(),
             pending_despawns: Vec::new(),
             sprite_assets: HashMap::new(),
             center,
@@ -445,11 +445,9 @@ impl MapRenderer {
     }
 
     pub fn despawn_visible(&mut self, commands: &mut Commands<'_, '_>) {
-        for entity in self
-            .last_seen
-            .drain()
-            .chain(self.pending_despawns.drain(..))
-        {
+        let mut entities: Vec<Entity> = self.last_seen.drain().map(|(entity, _)| entity).collect();
+        entities.append(&mut self.pending_despawns);
+        for entity in entities {
             if commands.get_entity(entity).is_ok() {
                 commands.entity(entity).despawn();
             }
@@ -642,6 +640,7 @@ pub fn rendering_system(
     let sync_existing = settings.is_changed() || render_state.is_changed();
     let MapRenderer {
         rtree,
+        uid_envelopes,
         last_seen,
         spare_seen: seen,
         sprite_assets,
@@ -688,11 +687,25 @@ pub fn rendering_system(
                 entity
             }
         };
-        seen.insert(entity);
+        seen.insert(entity, elem.uid);
     }
 
-    for elem in last_seen.difference(seen) {
-        commands.entity(*elem).despawn();
+    // Despawn elements that left the view and clear their stale entity ids so
+    // they never point at a recycled slot.
+    for (entity, uid) in last_seen.iter() {
+        if seen.contains_key(entity) {
+            continue;
+        }
+        if let Some(&env) = uid_envelopes.get(uid)
+            && let Some(elem) = rtree
+                .locate_in_envelope_intersecting_mut(env)
+                .find(|r| r.uid == *uid)
+        {
+            elem.id = None;
+        }
+        if commands.get_entity(*entity).is_ok() {
+            commands.entity(*entity).despawn();
+        }
     }
 
     mem::swap(last_seen, seen);
@@ -706,12 +719,10 @@ pub fn animation_system(
 ) {
     for (state, mut sprite) in &mut query {
         let index = frame_index(&state.frames, time.elapsed());
-        if sprite
-            .texture_atlas
-            .as_ref()
-            .is_some_and(|atlas| atlas.index != index)
+        if let Some(atlas) = sprite.texture_atlas.as_mut()
+            && atlas.index != index
         {
-            sprite.texture_atlas.as_mut().unwrap().index = index;
+            atlas.index = index;
         }
     }
 }
@@ -947,8 +958,8 @@ mod tests {
                 rtree: RTree::new(),
                 uid_envelopes: HashMap::new(),
                 next_uid: 1,
-                last_seen: HashSet::new(),
-                spare_seen: HashSet::new(),
+                last_seen: HashMap::new(),
+                spare_seen: HashMap::new(),
                 pending_despawns: Vec::new(),
                 sprite_assets: HashMap::new(),
                 center: Vec2::ZERO,
@@ -1105,8 +1116,8 @@ mod tests {
             rtree: RTree::bulk_load(vec![elem_top_z.clone(), elem_solid.clone()]),
             uid_envelopes: HashMap::new(),
             next_uid: 3,
-            last_seen: HashSet::new(),
-            spare_seen: HashSet::new(),
+            last_seen: HashMap::new(),
+            spare_seen: HashMap::new(),
             pending_despawns: Vec::new(),
             sprite_assets,
             center: Vec2::ZERO,
@@ -1181,8 +1192,8 @@ mod tests {
             rtree: RTree::bulk_load(vec![elem1, elem2]),
             uid_envelopes: HashMap::new(),
             next_uid: 3,
-            last_seen: HashSet::new(),
-            spare_seen: HashSet::new(),
+            last_seen: HashMap::new(),
+            spare_seen: HashMap::new(),
             pending_despawns: Vec::new(),
             sprite_assets: HashMap::new(),
             center: Vec2::ZERO,

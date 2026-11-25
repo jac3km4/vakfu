@@ -186,6 +186,7 @@ pub struct EditorState {
     egui_textures: HashMap<i32, (Handle<Image>, egui::TextureId)>,
     ghost_entity: Option<Entity>,
     ghost_def_id: Option<i32>,
+    ghost_layouts: HashMap<i32, Handle<TextureAtlasLayout>>,
     pub history: EditorHistory,
     last_map_id: Option<i32>,
 }
@@ -211,6 +212,7 @@ impl Default for EditorState {
             egui_textures: HashMap::new(),
             ghost_entity: None,
             ghost_def_id: None,
+            ghost_layouts: HashMap::new(),
             history: EditorHistory::default(),
             last_map_id: None,
         }
@@ -1250,11 +1252,15 @@ pub fn editor_ghost_system(
         return;
     }
 
-    let def_id = editor.brush.definition_id.unwrap();
+    let Some(def_id) = editor.brush.definition_id else {
+        return;
+    };
     let Some(def) = catalog.sprites.get(def_id) else {
         return;
     };
-    let (cell_x, cell_y) = editor.hovered_cell.unwrap();
+    let Some((cell_x, cell_y)) = editor.hovered_cell else {
+        return;
+    };
     let eff_z = editor.effective_brush_z();
     let (sx, sy) = iso_to_screen(
         cell_x,
@@ -1273,12 +1279,20 @@ pub fn editor_ghost_system(
             commands.entity(old).despawn();
         }
         let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", def.texture_id()));
-        let (sw, sh) = def.size();
+        // Cache one layout per definition: rebuilding it on every definition
+        // switch leaked a new TextureAtlasLayout each time.
+        let layout = if let Some(layout) = editor.ghost_layouts.get(&def_id) {
+            layout.clone()
+        } else {
+            let (sw, sh) = def.size();
+            let layout = atlas_layouts.add(atlas_layout_parts(
+                UVec2::new(sw.into(), sh.into()),
+                &def.animation(),
+            ));
+            editor.ghost_layouts.insert(def_id, layout.clone());
+            layout
+        };
         let (dw, dh) = def.texture_size();
-        let layout = atlas_layouts.add(atlas_layout_parts(
-            UVec2::new(sw.into(), sh.into()),
-            &def.animation(),
-        ));
         let mut sprite = Sprite::from_atlas_image(img, layout.into());
         sprite.color = ghost_color;
         sprite.flip_x = def.flags().is_flip();

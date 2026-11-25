@@ -99,7 +99,11 @@ impl ErasedAssetReader for JarAssetSource {
         Result<Box<dyn bevy::asset::io::Reader + 'a>, bevy::asset::io::AssetReaderError>,
     > {
         Box::pin(async {
-            let mut archive = self.archive.lock().unwrap();
+            let mut archive = self.archive.lock().map_err(|_| {
+                bevy::asset::io::AssetReaderError::Io(
+                    std::io::Error::other("asset archive lock poisoned").into(),
+                )
+            })?;
             let mut entry = archive
                 .by_name(&path.to_string_lossy())
                 .map_err(|err| match err {

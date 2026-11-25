@@ -3,7 +3,7 @@ use bevy::input::mouse::{MouseButtonInput, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy_egui::{EguiContext, PrimaryEguiContext, egui};
 
-#[derive(Resource)]
+#[derive(Clone, Resource)]
 pub struct CameraController {
     pub dragging: bool,
     pub last_cursor_position: Option<Vec2>,
@@ -183,11 +183,6 @@ pub fn camera_system(
     let Ok(mut transform) = cameras.single_mut() else {
         return Ok(());
     };
-
-    if controller.current_position == Vec3::ZERO && controller.target_position == Vec3::ZERO {
-        controller.current_position = transform.translation;
-        controller.target_position = transform.translation;
-    }
 
     let dt = time.delta_secs();
     let pos_factor = 1.0 - (1.0 - controller.position_smoothness.clamp(0.0, 0.999)).powf(dt * 60.0);
