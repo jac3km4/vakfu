@@ -5,7 +5,7 @@ use bevy::ecs::system::{Local, Res, ResMut};
 use bevy_egui::{EguiContexts, egui};
 
 use crate::assets::LightingState;
-use crate::render::{ChangeMapEvent, MapCatalog};
+use crate::render::{ChangeMapEvent, GroupVisibilityState, MapCatalog, MapRenderer};
 
 #[derive(Debug, Clone, PartialEq, Resource)]
 pub struct MapViewSettings {
@@ -124,6 +124,8 @@ pub fn settings_ui_system(
     mut contexts: EguiContexts<'_, '_>,
     mut settings: ResMut<'_, MapViewSettings>,
     catalog: Res<'_, MapCatalog>,
+    renderer: Res<'_, MapRenderer>,
+    groups: Res<'_, GroupVisibilityState>,
     mut change_map: MessageWriter<'_, ChangeMapEvent>,
     mut search_filter: Local<'_, String>,
 ) -> bevy::prelude::Result {
@@ -156,10 +158,44 @@ pub fn settings_ui_system(
             });
             ui.horizontal(|ui| {
                 ui.checkbox(&mut edited_settings.group_filter_on, "Group filter");
+                if edited_settings.group_filter_on {
+                    // Keep the selection on a group that exists in this map.
+                    let available = renderer.available_groups();
+                    if !available.contains(&edited_settings.group)
+                        && let Some(&first) = available.first()
+                    {
+                        edited_settings.group = first;
+                    }
+                    egui::ComboBox::from_id_salt("group_filter")
+                        .selected_text(format!("G{}", edited_settings.group))
+                        .show_ui(ui, |ui| {
+                            for &group in available {
+                                ui.selectable_value(
+                                    &mut edited_settings.group,
+                                    group,
+                                    format!("G{group}"),
+                                );
+                            }
+                        });
+                }
+            });
+            ui.horizontal(|ui| {
+                let has_groups = groups.0.is_some();
                 ui.add_enabled(
-                    edited_settings.group_filter_on,
-                    egui::Slider::new(&mut edited_settings.group, -1..=1),
-                );
+                    has_groups && !edited_settings.group_filter_on,
+                    egui::Checkbox::new(
+                        &mut edited_settings.auto_group_visibility,
+                        "Auto group fade",
+                    ),
+                )
+                .on_disabled_hover_text(if has_groups {
+                    "Disabled while a single group is isolated"
+                } else {
+                    "This map has no groups.lib metadata"
+                });
+                if has_groups {
+                    ui.weak(format!("camera: G{}", renderer.active_camera_group()));
+                }
             });
             ui.horizontal(|ui| {
                 ui.label("LOD:");
