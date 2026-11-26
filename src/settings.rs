@@ -120,6 +120,41 @@ pub fn lighting_controls_ui(ui: &mut egui::Ui, settings: &mut MapViewSettings) {
     });
 }
 
+/// Draws a one-of-many map filter: an enable checkbox plus a combo box over the
+/// values the current map actually contains.
+///
+/// Sharing this between the layer and group filters keeps the settings window
+/// predictable, and the combo box cannot select a value that would blank the map.
+fn map_filter_ui<T>(
+    ui: &mut egui::Ui,
+    label: &str,
+    enabled: &mut bool,
+    selected: &mut T,
+    available: &[T],
+    prefix: &str,
+    id_salt: &str,
+) where
+    T: Copy + PartialEq + std::fmt::Display,
+{
+    ui.checkbox(enabled, label);
+    if !*enabled {
+        return;
+    }
+    // Keep the selection on a value the current map actually uses.
+    if !available.contains(selected)
+        && let Some(&first) = available.first()
+    {
+        *selected = first;
+    }
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(format!("{prefix}{selected}"))
+        .show_ui(ui, |ui| {
+            for &value in available {
+                ui.selectable_value(selected, value, format!("{prefix}{value}"));
+            }
+        });
+}
+
 pub fn settings_ui_system(
     mut contexts: EguiContexts<'_, '_>,
     mut settings: ResMut<'_, MapViewSettings>,
@@ -150,34 +185,26 @@ pub fn settings_ui_system(
             ui.separator();
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut edited_settings.layer_filter_on, "Layer filter");
-                ui.add_enabled(
-                    edited_settings.layer_filter_on,
-                    egui::Slider::new(&mut edited_settings.layer, 0..=127),
+                map_filter_ui(
+                    ui,
+                    "Layer filter",
+                    &mut edited_settings.layer_filter_on,
+                    &mut edited_settings.layer,
+                    renderer.available_layers(),
+                    "L",
+                    "layer_filter",
                 );
             });
             ui.horizontal(|ui| {
-                ui.checkbox(&mut edited_settings.group_filter_on, "Group filter");
-                if edited_settings.group_filter_on {
-                    // Keep the selection on a group that exists in this map.
-                    let available = renderer.available_groups();
-                    if !available.contains(&edited_settings.group)
-                        && let Some(&first) = available.first()
-                    {
-                        edited_settings.group = first;
-                    }
-                    egui::ComboBox::from_id_salt("group_filter")
-                        .selected_text(format!("G{}", edited_settings.group))
-                        .show_ui(ui, |ui| {
-                            for &group in available {
-                                ui.selectable_value(
-                                    &mut edited_settings.group,
-                                    group,
-                                    format!("G{group}"),
-                                );
-                            }
-                        });
-                }
+                map_filter_ui(
+                    ui,
+                    "Group filter",
+                    &mut edited_settings.group_filter_on,
+                    &mut edited_settings.group,
+                    renderer.available_groups(),
+                    "G",
+                    "group_filter",
+                );
             });
             ui.horizontal(|ui| {
                 let has_groups = groups.0.is_some();
