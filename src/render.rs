@@ -298,6 +298,29 @@ impl MapRenderer {
         &self.available_layers
     }
 
+    /// Returns the shared image handle and atlas layout for `def`.
+    ///
+    /// The renderer and the editor palette both use this cache, so each
+    /// definition is loaded once per map. Switching maps replaces the
+    /// [`MapRenderer`], dropping the previous handles with it.
+    pub fn sprite_asset(
+        &mut self,
+        def: &MapSpriteDefinition,
+        assets: &AssetServer,
+        atlas_layouts: &mut Assets<TextureAtlasLayout>,
+    ) -> (Handle<Image>, Handle<TextureAtlasLayout>) {
+        let (sample_width, sample_height) = def.size();
+        ensure_sprite_asset(
+            &mut self.sprite_assets,
+            assets,
+            atlas_layouts,
+            def.id(),
+            def.texture_id(),
+            UVec2::new(sample_width.into(), sample_height.into()),
+            &def.animation(),
+        )
+    }
+
     pub fn allocate_uid(&mut self) -> u64 {
         let uid = self.next_uid;
         self.next_uid += 1;
@@ -1299,12 +1322,15 @@ fn render(
     renderable: &Renderable,
     enable_light: bool,
 ) -> Entity {
-    let (img, layout) = sprite_assets
-        .entry(renderable.definition_id)
-        .or_insert_with(|| {
-            let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", renderable.texture_id));
-            (img, atlas_layouts.add(atlas_layout(renderable)))
-        });
+    let (img, layout) = ensure_sprite_asset(
+        sprite_assets,
+        assets,
+        atlas_layouts,
+        renderable.definition_id,
+        renderable.texture_id,
+        renderable.texture_size,
+        &renderable.animation,
+    );
 
     let mut sprite = Sprite::from_atlas_image(img.clone(), layout.clone().into());
     let mut active_color = if enable_light {
@@ -1430,6 +1456,27 @@ pub fn premultiplied_tint(color: LinearRgba) -> Color {
 
 pub fn atlas_layout(renderable: &Renderable) -> TextureAtlasLayout {
     atlas_layout_parts(renderable.texture_size, &renderable.animation)
+}
+
+/// Returns the shared image handle and atlas layout for a definition,
+/// creating and caching them on first use.
+fn ensure_sprite_asset(
+    sprite_assets: &mut HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
+    assets: &AssetServer,
+    atlas_layouts: &mut Assets<TextureAtlasLayout>,
+    definition_id: i32,
+    texture_id: i32,
+    sample_size: UVec2,
+    animation: &Animation,
+) -> (Handle<Image>, Handle<TextureAtlasLayout>) {
+    sprite_assets
+        .entry(definition_id)
+        .or_insert_with(|| {
+            let image = assets.load::<Image>(format!("gfx://gfx/{texture_id}.tgam"));
+            let layout = atlas_layouts.add(atlas_layout_parts(sample_size, animation));
+            (image, layout)
+        })
+        .clone()
 }
 
 /// Builds a texture atlas for a sprite.

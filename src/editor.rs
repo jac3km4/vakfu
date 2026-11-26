@@ -11,11 +11,13 @@ use bevy_egui::{EguiContexts, EguiTextureHandle, PrimaryEguiContext};
 use hashbrown::HashMap;
 use rstar::RTreeObject;
 
-use crate::assets::{Animation, LightingState, iso_cell_diamond, iso_to_screen, screen_to_iso};
+use crate::assets::{
+    Animation, LightingState, MapSpriteDefinition, iso_cell_diamond, iso_to_screen, screen_to_iso,
+};
 use crate::camera::{CameraController, MainCamera, OVERLAY_LAYER, is_pointer_over_ui};
 use crate::render::{
     ChangeMapEvent, MapCatalog, MapRenderer, MapSprite, Renderable, RenderableSpec,
-    atlas_layout_parts, premultiplied_tint,
+    premultiplied_tint,
 };
 use crate::settings::{MapViewSettings, lighting_controls_ui, map_selector_ui};
 
@@ -190,10 +192,11 @@ pub struct EditorState {
     pub palette_only_used: bool,
     sorted_sprite_ids: Vec<i32>,
     pub map_search: String,
-    egui_textures: HashMap<i32, (Handle<Image>, egui::TextureId)>,
+    /// Egui texture ids by TGAM texture id; the image handles live in
+    /// [`MapRenderer::sprite_assets`].
+    egui_textures: HashMap<i32, egui::TextureId>,
     ghost_entity: Option<Entity>,
     ghost_def_id: Option<i32>,
-    ghost_layouts: HashMap<i32, Handle<TextureAtlasLayout>>,
     pub history: EditorHistory,
     /// Element state captured when an inspector drag/focus edit begins.
     inspector_before: Option<Renderable>,
@@ -221,7 +224,6 @@ impl Default for EditorState {
             egui_textures: HashMap::new(),
             ghost_entity: None,
             ghost_def_id: None,
-            ghost_layouts: HashMap::new(),
             history: EditorHistory::default(),
             inspector_before: None,
             last_map_id: None,
@@ -240,16 +242,19 @@ impl EditorState {
 
     fn get_or_register_texture(
         &mut self,
-        texture_id: i32,
+        def: &MapSpriteDefinition,
+        renderer: &mut MapRenderer,
         assets: &AssetServer,
+        atlas_layouts: &mut Assets<TextureAtlasLayout>,
         contexts: &mut EguiContexts<'_, '_>,
     ) -> egui::TextureId {
-        if let Some((_, tex_id)) = self.egui_textures.get(&texture_id) {
-            return *tex_id;
+        let texture_id = def.texture_id();
+        if let Some(&tex_id) = self.egui_textures.get(&texture_id) {
+            return tex_id;
         }
-        let handle = assets.load::<Image>(format!("gfx://gfx/{texture_id}.tgam"));
+        let (handle, _) = renderer.sprite_asset(def, assets, atlas_layouts);
         let tex_id = contexts.add_image(EguiTextureHandle::Weak(handle.id()));
-        self.egui_textures.insert(texture_id, (handle, tex_id));
+        self.egui_textures.insert(texture_id, tex_id);
         tex_id
     }
 }
@@ -258,6 +263,7 @@ impl EditorState {
 pub struct EditorUiParams<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     assets: Res<'w, AssetServer>,
+    atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     settings: ResMut<'w, MapViewSettings>,
     catalog: Res<'w, MapCatalog>,
     renderer: ResMut<'w, MapRenderer>,
@@ -270,6 +276,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
     let EditorUiParams {
         mut contexts,
         assets,
+        mut atlas_layouts,
         mut settings,
         catalog,
         mut renderer,
@@ -283,6 +290,9 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
         editor.drag_state = None;
         editor.history.clear();
         editor.inspector_before = None;
+        // Image handles now live in the new renderer's cache; drop the egui
+        // ids so switching through maps does not accumulate textures.
+        editor.egui_textures.clear();
         let ground_z = renderer.default_ground_z();
         editor.hovered_surface_z = ground_z;
         if !editor.brush.snap_to_surface {
@@ -521,8 +531,10 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                                     continue;
                                 };
                                 let tex_id = editor.get_or_register_texture(
-                                    def.texture_id(),
+                                    def,
+                                    &mut renderer,
                                     &assets,
+                                    &mut atlas_layouts,
                                     &mut contexts,
                                 );
                                 let is_selected = editor.brush.definition_id == Some(def_id);
@@ -1301,6 +1313,7 @@ pub struct EditorGhostParams<'w, 's> {
     catalog: Res<'w, MapCatalog>,
     windows: Query<'w, 's, &'static Window>,
     camera_controller: Res<'w, CameraController>,
+    renderer: ResMut<'w, MapRenderer>,
     editor: ResMut<'w, EditorState>,
     egui_contexts: Query<'w, 's, &'static mut bevy_egui::EguiContext, With<PrimaryEguiContext>>,
     ghosts: Query<'w, 's, (&'static mut Sprite, &'static mut Transform)>,
@@ -1314,6 +1327,7 @@ pub fn editor_ghost_system(params: EditorGhostParams<'_, '_>) {
         catalog,
         windows,
         camera_controller,
+        mut renderer,
         mut editor,
         mut egui_contexts,
         mut ghosts,
@@ -1365,20 +1379,7 @@ pub fn editor_ghost_system(params: EditorGhostParams<'_, '_>) {
         {
             commands.entity(old).despawn();
         }
-        let img = assets.load::<Image>(format!("gfx://gfx/{}.tgam", def.texture_id()));
-        // Cache one layout per definition: rebuilding it on every definition
-        // switch leaked a new TextureAtlasLayout each time.
-        let layout = if let Some(layout) = editor.ghost_layouts.get(&def_id) {
-            layout.clone()
-        } else {
-            let (sw, sh) = def.size();
-            let layout = atlas_layouts.add(atlas_layout_parts(
-                UVec2::new(sw.into(), sh.into()),
-                &def.animation(),
-            ));
-            editor.ghost_layouts.insert(def_id, layout.clone());
-            layout
-        };
+        let (img, layout) = renderer.sprite_asset(def, &assets, &mut atlas_layouts);
         let (dw, dh) = def.texture_size();
         let mut sprite = Sprite::from_atlas_image(img, layout.into());
         sprite.color = ghost_color;
