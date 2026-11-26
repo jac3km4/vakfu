@@ -714,7 +714,7 @@ impl MapRenderer {
         elapsed: Duration,
         alpha_threshold: u8,
     ) -> bool {
-        if elem.color.alpha <= 0.01 {
+        if elem.color.alpha <= 0.01 || !group_alpha_visible(elem.group_alpha) {
             return false;
         }
         let (rw, rh) = (elem.render_size.x, elem.render_size.y);
@@ -1954,6 +1954,20 @@ mod tests {
             false,
         );
         assert_eq!(transform.translation, elem.position);
+    }
+
+    #[test]
+    fn pick_at_world_skips_elements_hidden_by_group_fade() {
+        let mut front = test_renderable(1, 10.0, 1);
+        front.group_alpha = 0.0;
+        let back = test_renderable(2, 5.0, 0);
+        let renderer = test_renderer(vec![front, back]);
+        let images = Assets::<bevy::image::Image>::default();
+        let settings = MapViewSettings::default();
+
+        // The front element has faded with its group; the visible one wins.
+        let picked = renderer.pick_at_world(5.0, -5.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked.map(|elem| elem.uid), Some(2));
     }
 
     #[test]
