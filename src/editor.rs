@@ -19,8 +19,8 @@ use crate::camera::{
     CameraController, EguiInputState, MainCamera, OVERLAY_LAYER, egui_input_state,
 };
 use crate::render::{
-    ChangeMapEvent, MapCatalog, MapRenderer, MapSprite, Renderable, RenderableSpec,
-    premultiplied_tint,
+    ChangeMapEvent, GroupVisibilityState, MapCatalog, MapRenderer, MapSprite, Renderable,
+    RenderableSpec, premultiplied_tint,
 };
 use crate::settings::{MapViewSettings, lighting_controls_ui, map_selector_ui};
 
@@ -269,6 +269,7 @@ pub struct EditorUiParams<'w, 's> {
     atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     settings: ResMut<'w, MapViewSettings>,
     catalog: Res<'w, MapCatalog>,
+    groups: Res<'w, GroupVisibilityState>,
     renderer: ResMut<'w, MapRenderer>,
     camera_controller: ResMut<'w, CameraController>,
     editor: ResMut<'w, EditorState>,
@@ -282,6 +283,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
         mut atlas_layouts,
         mut settings,
         catalog,
+        groups,
         mut renderer,
         mut camera_controller,
         mut editor,
@@ -396,6 +398,15 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             ui.separator();
             ui.monospace(format!("Z: {}", editor.effective_brush_z()));
             ui.separator();
+            let (group, group_mode) = if edited_settings.group_filter_on {
+                (edited_settings.group, "filter")
+            } else if edited_settings.auto_group_visibility && groups.0.is_some() {
+                (renderer.active_camera_group(), "auto")
+            } else {
+                (renderer.active_camera_group(), "all")
+            };
+            ui.monospace(format!("Group: G{group} ({group_mode})"));
+            ui.separator();
             ui.monospace(format!(
                 "Zoom: {:.0}%",
                 (1.0 / camera_controller.current_zoom) * 100.0
@@ -407,7 +418,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
         });
     });
 
-    // Left Dock: Sprite Palette & Layers
+    // Left Dock: Sprite Palette, Layers & Groups
     const PALETTE_TILE_SIZE: f32 = 36.0;
     const PALETTE_TILE_SPACING: f32 = 4.0;
     const PALETTE_TILE_PAD: f32 = 3.0;
@@ -447,6 +458,40 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                         edited_settings.layer_filter_on = true;
                         edited_settings.layer = layer;
                         editor.brush.layer = layer;
+                    }
+                }
+            });
+
+            ui.separator();
+            ui.heading("Groups");
+            ui.horizontal_wrapped(|ui| {
+                let has_groups = groups.0.is_some();
+                let all_active = !edited_settings.group_filter_on
+                    && (!has_groups || !edited_settings.auto_group_visibility);
+                if ui.selectable_label(all_active, "All").clicked() {
+                    edited_settings.group_filter_on = false;
+                    edited_settings.auto_group_visibility = false;
+                }
+                let auto_active =
+                    !edited_settings.group_filter_on && edited_settings.auto_group_visibility;
+                let auto_label = format!("Auto (G{})", renderer.active_camera_group());
+                if ui
+                    .add_enabled(
+                        has_groups,
+                        egui::Button::selectable(auto_active, auto_label),
+                    )
+                    .on_disabled_hover_text("This map has no groups.lib metadata")
+                    .clicked()
+                {
+                    edited_settings.group_filter_on = false;
+                    edited_settings.auto_group_visibility = true;
+                }
+                for &group in renderer.available_groups() {
+                    let active = edited_settings.group_filter_on && edited_settings.group == group;
+                    if ui.selectable_label(active, format!("G{group}")).clicked() {
+                        edited_settings.group_filter_on = true;
+                        edited_settings.group = group;
+                        editor.brush.group = group;
                     }
                 }
             });
