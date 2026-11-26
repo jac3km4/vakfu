@@ -109,6 +109,12 @@ pub struct MapRenderer {
     spare_visible: HashSet<Entity>,
     /// Entities awaiting an explicit despawn (element removal or map switch).
     pending_despawns: Vec<Entity>,
+    /// Sprite the editor is currently dragging, if any.
+    ///
+    /// The drag preview owns its transform until the move is committed, so the
+    /// renderer must not snap it back to the element's stored position (or hide
+    /// it) while the drag is in progress.
+    pub(crate) dragged_entity: Option<Entity>,
     sprite_assets: HashMap<i32, (Handle<Image>, Handle<TextureAtlasLayout>)>,
     center: Vec2,
     used_definitions: Vec<i32>,
@@ -272,6 +278,7 @@ impl MapRenderer {
             visible: HashSet::new(),
             spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
+            dragged_entity: None,
             sprite_assets: HashMap::new(),
             center,
             used_definitions,
@@ -621,6 +628,9 @@ impl MapRenderer {
             .clone();
         let removed = self.rtree.remove(&target)?;
         self.unregister_altitude((removed.cell_x, removed.cell_y), removed.altitude_order);
+        if removed.id == self.dragged_entity {
+            self.dragged_entity = None;
+        }
         if let Some(entity) = removed.id {
             self.visible.remove(&entity);
             self.spare_visible.remove(&entity);
@@ -1069,6 +1079,7 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     };
 
     let sync_existing = settings.is_changed() || render_state.is_changed();
+    let dragged_entity = render_state.dragged_entity;
     let MapRenderer {
         rtree,
         visible,
@@ -1104,20 +1115,14 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
                     && let Ok((mut sprite, mut elem_transform, mut visibility)) =
                         sprites.get_mut(id)
                 {
-                    let mut active_color = if settings.enable_light {
-                        elem.color_tinted
-                    } else {
-                        elem.color
-                    };
-                    active_color.alpha *= elem.group_alpha;
-                    let color = premultiplied_tint(active_color);
-                    if sprite.color != color {
-                        sprite.color = color;
-                    }
-                    if elem_transform.translation != elem.position {
-                        elem_transform.translation = elem.position;
-                    }
-                    visibility.set_if_neq(Visibility::Inherited);
+                    sync_sprite(
+                        &mut sprite,
+                        &mut elem_transform,
+                        &mut visibility,
+                        elem,
+                        settings.enable_light,
+                        dragged_entity == Some(id),
+                    );
                 }
                 id
             }
@@ -1141,7 +1146,7 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     // entities alive avoids per-pan archetype churn and lets Bevy skip them
     // entirely while hidden.
     for entity in visible.iter() {
-        if seen.contains(entity) {
+        if seen.contains(entity) || Some(*entity) == dragged_entity {
             continue;
         }
         if let Ok((_, _, mut visibility)) = sprites.get_mut(*entity) {
@@ -1152,6 +1157,37 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     mem::swap(visible, seen);
 
     Ok(())
+}
+
+/// Re-syncs an existing sprite with its renderable's cached appearance.
+///
+/// While the editor is dragging `elem`, the live transform is the drag preview,
+/// so it is left untouched; the move is committed to the renderable only when
+/// the drag is released.
+fn sync_sprite(
+    sprite: &mut Sprite,
+    transform: &mut Transform,
+    visibility: &mut Visibility,
+    elem: &Renderable,
+    enable_light: bool,
+    dragging: bool,
+) {
+    let mut active_color = if enable_light {
+        elem.color_tinted
+    } else {
+        elem.color
+    };
+    active_color.alpha *= elem.group_alpha;
+    let color = premultiplied_tint(active_color);
+    if sprite.color != color {
+        sprite.color = color;
+    }
+    if !dragging && transform.translation != elem.position {
+        transform.translation = elem.position;
+    }
+    if *visibility != Visibility::Inherited {
+        *visibility = Visibility::Inherited;
+    }
 }
 
 /// Recomputes cached lit colours when the time-of-day lighting changes.
@@ -1576,6 +1612,7 @@ mod tests {
             visible: HashSet::new(),
             spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
+            dragged_entity: None,
             sprite_assets: HashMap::new(),
             center: Vec2::ZERO,
             used_definitions: Vec::new(),
@@ -1612,6 +1649,7 @@ mod tests {
                 visible: HashSet::new(),
                 spare_visible: HashSet::new(),
                 pending_despawns: Vec::new(),
+                dragged_entity: None,
                 sprite_assets: HashMap::new(),
                 center: Vec2::ZERO,
                 used_definitions: Vec::new(),
@@ -1889,6 +1927,36 @@ mod tests {
     }
 
     #[test]
+    fn sync_sprite_keeps_a_dragged_preview_transform() {
+        let elem = test_renderable(1, 5.0, 0);
+        let mut sprite = Sprite::default();
+        let mut transform = Transform::from_xyz(7.0, 8.0, 9.0);
+        let mut visibility = Visibility::Hidden;
+
+        sync_sprite(
+            &mut sprite,
+            &mut transform,
+            &mut visibility,
+            &elem,
+            false,
+            true,
+        );
+        assert_eq!(transform.translation, Vec3::new(7.0, 8.0, 9.0));
+        assert_eq!(visibility, Visibility::Inherited);
+
+        // Releasing the drag hands the transform back to the renderer.
+        sync_sprite(
+            &mut sprite,
+            &mut transform,
+            &mut visibility,
+            &elem,
+            false,
+            false,
+        );
+        assert_eq!(transform.translation, elem.position);
+    }
+
+    #[test]
     fn test_pick_at_world_selects_frontmost_sprite_and_respects_alpha() {
         use bevy::asset::RenderAssetUsages;
         use bevy::image::Image;
@@ -1986,6 +2054,7 @@ mod tests {
             visible: HashSet::new(),
             spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
+            dragged_entity: None,
             sprite_assets,
             center: Vec2::ZERO,
             used_definitions: vec![10, 99],
@@ -2031,6 +2100,7 @@ mod tests {
             visible: HashSet::new(),
             spare_visible: HashSet::new(),
             pending_despawns: Vec::new(),
+            dragged_entity: None,
             sprite_assets: HashMap::new(),
             center: Vec2::ZERO,
             used_definitions: Vec::new(),

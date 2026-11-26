@@ -1096,6 +1096,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                             .cloned()
                         {
                             editor.selected_uid = Some(picked.uid);
+                            renderer.dragged_entity = picked.id;
                             let hover = screen_to_iso(
                                 world_pos.x,
                                 world_pos.y,
@@ -1145,6 +1146,7 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                 }
             }
             ButtonState::Released => {
+                renderer.dragged_entity = None;
                 if let Some(drag) = editor.drag_state.take()
                     && drag.current_cell != (drag.before.cell_x, drag.before.cell_y)
                     && let Some(mut after) = renderer.get_element(drag.uid).cloned()
