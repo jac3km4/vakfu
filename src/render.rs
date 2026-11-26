@@ -132,6 +132,8 @@ pub struct RenderableSpec<'a> {
     pub group: i32,
     pub layer: u8,
     pub color: LinearRgba,
+    /// Active time-of-day lighting used to shade the new element.
+    pub lighting: &'a LightingState,
 }
 
 impl MapRenderer {
@@ -505,6 +507,7 @@ impl MapRenderer {
             group,
             layer,
             color,
+            lighting,
         } = spec;
         let uid = self.allocate_uid();
         let (sx, sy) = iso_to_screen(cell_x, cell_y, i32::from(cell_z) - i32::from(height));
@@ -525,7 +528,7 @@ impl MapRenderer {
         );
         let z = self.place_z(envelope, hashcode, None);
         let light = *self.light_map.get_color(cell_x, cell_y, layer as i32);
-        let [lr, lg, lb] = LightingState::default().shade(&light);
+        let [lr, lg, lb] = lighting.shade_at(&light, cell_x as f32, cell_y as f32);
         let color_tinted = LinearRgba::new(
             color.red * lr,
             color.green * lg,
@@ -1122,21 +1125,25 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
 
 /// Recomputes cached lit colours when the time-of-day lighting changes.
 ///
+/// The system also retints whenever the displayed map changes: a newly loaded
+/// [`MapRenderer`] replaces the resource, so its change flag alone cannot tell
+/// us that its cached colours came from a different map (or from defaults).
 /// `rendering_system` re-syncs visible sprites whenever [`MapRenderer`] is
 /// changed, so updating the cached colours here is enough to refresh the view.
 pub fn lighting_system(
     settings: Res<'_, MapViewSettings>,
+    catalog: Res<'_, MapCatalog>,
     mut render_state: ResMut<'_, MapRenderer>,
-    mut last: Local<'_, Option<LightingState>>,
+    mut last: Local<'_, Option<(i32, LightingState)>>,
 ) {
-    if last.as_ref() == Some(&settings.lighting) {
+    let current = (catalog.current_map_id, settings.lighting.clone());
+    if last.as_ref() == Some(&current) {
         return;
     }
-    let lighting = settings.lighting.clone();
     for elem in &mut render_state.rtree {
-        elem.retint(&lighting);
+        elem.retint(&settings.lighting);
     }
-    *last = Some(lighting);
+    *last = Some(current);
 }
 
 pub fn animation_system(
@@ -1690,6 +1697,56 @@ mod tests {
         // candidates must be resolved at their own `cell_z`.
         assert_ne!(screen_to_iso(x, y, 0), (5, 5));
         assert_eq!(camera_group(&renderer.rtree, Vec2::new(x, y)), 2000);
+    }
+
+    #[test]
+    fn lighting_system_retints_newly_loaded_map() {
+        use byte::TryRead;
+        use byte::ctx::LittleEndian;
+
+        let (sprites, _) = MapSpriteLibrary::try_read(&0u32.to_le_bytes(), LittleEndian).unwrap();
+        let lighting = LightingState {
+            sun_color: [0.5, 1.0, 0.25],
+            ..LightingState::default()
+        };
+        let mut app = App::new();
+        app.insert_resource(MapViewSettings {
+            lighting: lighting.clone(),
+            ..MapViewSettings::default()
+        })
+        .insert_resource(MapCatalog {
+            maps_path: std::path::PathBuf::new(),
+            sprites: Arc::new(sprites),
+            available_maps: vec![1, 2],
+            current_map_id: 1,
+        })
+        .insert_resource(test_renderer(vec![test_renderable(1, 1.0, 0)]))
+        .add_systems(Update, lighting_system);
+
+        let tinted = |app: &App| {
+            app.world()
+                .resource::<MapRenderer>()
+                .rtree
+                .iter()
+                .next()
+                .unwrap()
+                .color_tinted
+        };
+        // The 0.25 sun channel is raised to the 0.3 shadow floor.
+        let expected = LinearRgba::new(0.5, 1.0, 0.3, 1.0);
+
+        app.update();
+        assert_eq!(tinted(&app), expected);
+
+        // Swapping the renderer for another map must retint even though the
+        // settings did not change; the new map starts from default lighting.
+        app.world_mut()
+            .insert_resource(test_renderer(vec![test_renderable(2, 1.0, 0)]));
+        app.world_mut()
+            .resource_mut::<MapCatalog>()
+            .current_map_id = 2;
+        app.update();
+        assert_eq!(tinted(&app), expected);
     }
 
     #[test]

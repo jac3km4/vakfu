@@ -297,6 +297,9 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
     }
 
     let mut edited_settings = settings.clone();
+    if edited_settings.auto_daylight {
+        edited_settings.lighting.apply_auto_daylight();
+    }
     let mut undo_clicked = false;
     let mut redo_clicked = false;
     let mut reset_cam_clicked = false;
@@ -400,20 +403,23 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             ui.checkbox(&mut editor.show_grid, "Grid");
             ui.checkbox(&mut edited_settings.enable_light, "Light");
             ui.menu_button("☀", |ui| {
-                ui.add(
-                    egui::Slider::new(
-                        &mut edited_settings.lighting.shadow_intensity,
-                        0.0..=1.0,
-                    )
-                    .text("Shadows"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut edited_settings.lighting.night_light_intensity,
-                        0.0..=1.0,
-                    )
-                    .text("Night lights"),
-                );
+                ui.checkbox(&mut edited_settings.auto_daylight, "Auto daylight");
+                ui.add_enabled_ui(!edited_settings.auto_daylight, |ui| {
+                    ui.add(
+                        egui::Slider::new(
+                            &mut edited_settings.lighting.shadow_intensity,
+                            0.0..=1.0,
+                        )
+                        .text("Shadows"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut edited_settings.lighting.night_light_intensity,
+                            0.0..=1.0,
+                        )
+                        .text("Night lights"),
+                    );
+                });
                 ui.horizontal(|ui| {
                     ui.label("Sun colour");
                     ui.color_edit_button_rgb(&mut edited_settings.lighting.sun_color);
@@ -1308,6 +1314,7 @@ impl PlacementContext<'_> {
             group: self.editor.brush.group,
             layer: self.editor.brush.layer,
             color: LinearRgba::new(r, g, b, a),
+            lighting: &self.settings.lighting,
         });
         if let Some(min_front_z) = surface_z_order
             && elem.position.z <= min_front_z
