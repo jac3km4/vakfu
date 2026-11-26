@@ -129,6 +129,11 @@ pub struct JarAssetSource {
     idle: Arc<Mutex<Vec<zip::ZipArchive<BufReader<File>>>>>,
 }
 
+/// Upper bound on pooled archive handles. A burst of concurrent loads should
+/// keep reusing its peak handles, but the pool must not retain that peak (and
+/// one file descriptor plus central directory each) forever.
+const MAX_IDLE_ARCHIVES: usize = 8;
+
 impl JarAssetSource {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, AssetError> {
         let path = path.as_ref();
@@ -151,7 +156,9 @@ impl JarAssetSource {
 
     /// Returns a handle to the pool once a read has finished.
     fn release(&self, archive: zip::ZipArchive<BufReader<File>>) {
-        if let Ok(mut idle) = self.idle.lock() {
+        if let Ok(mut idle) = self.idle.lock()
+            && idle.len() < MAX_IDLE_ARCHIVES
+        {
             idle.push(archive);
         }
     }
@@ -357,6 +364,27 @@ mod tests {
             read_bytes(&source, "gfx/missing.tgam"),
             Err(AssetReaderError::NotFound(_))
         ));
+
+        drop(source);
+        std::fs::remove_file(archive_path).unwrap();
+    }
+
+    #[test]
+    fn idle_archive_pool_is_bounded() {
+        let archive_path = temporary_archive("pool");
+        let file = File::create_new(&archive_path).unwrap();
+        drop(zip::ZipWriter::new(file).finish().unwrap());
+        let source = JarAssetSource::new(&archive_path).unwrap();
+
+        // Simulate a burst that opens more handles than the pool should keep.
+        let held: Vec<_> = (0..MAX_IDLE_ARCHIVES + 4)
+            .map(|_| source.acquire().unwrap())
+            .collect();
+        assert_eq!(held.len(), MAX_IDLE_ARCHIVES + 4);
+        for archive in held {
+            source.release(archive);
+        }
+        assert_eq!(source.idle.lock().unwrap().len(), MAX_IDLE_ARCHIVES);
 
         drop(source);
         std::fs::remove_file(archive_path).unwrap();
