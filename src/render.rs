@@ -76,12 +76,12 @@ pub struct MapCatalog {
 #[derive(Resource, Default)]
 pub struct GroupVisibilityState(pub Option<GroupVisibility>);
 
+type MapLoadResult = anyhow::Result<(MapRenderer, Option<GroupVisibility>)>;
+type MapLoadTask = Task<MapLoadResult>;
+
 #[derive(Resource, Default)]
 pub struct PendingMapLoad {
-    task: Option<(
-        i32,
-        Task<anyhow::Result<(MapRenderer, Option<GroupVisibility>)>>,
-    )>,
+    task: Option<(i32, MapLoadTask)>,
 }
 
 impl PendingMapLoad {
@@ -1586,9 +1586,7 @@ mod tests {
         }
     }
 
-    fn pending_task(
-        pool: &bevy::tasks::TaskPool,
-    ) -> Task<anyhow::Result<(MapRenderer, Option<GroupVisibility>)>> {
+    fn pending_task(pool: &bevy::tasks::TaskPool) -> MapLoadTask {
         pool.spawn(future::pending())
     }
 
