@@ -545,7 +545,15 @@ mod tests {
     #[test]
     fn test_rgba_to_f32_array_decoding() {
         // Alpha is decoded as `byte / 255 + 0.5`, clamped, and never doubled.
-        let alpha = |a: i8| Rgba { r: 0, g: 0, b: 0, a }.to_f32_array()[3];
+        let alpha = |a: i8| {
+            Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a,
+            }
+            .to_f32_array()[3]
+        };
         assert_eq!(alpha(0), 0.5);
         assert!((alpha(127) - (127.0 / 255.0 + 0.5)).abs() < 1e-6);
         assert_eq!(alpha(-128), 0.0);
@@ -621,13 +629,7 @@ mod tests {
 
         let elements: Vec<(i32, i32, i32)> = chunk
             .elements()
-            .map(|element| {
-                (
-                    element.definition_id(),
-                    element.cell_x(),
-                    element.cell_y(),
-                )
-            })
+            .map(|element| (element.definition_id(), element.cell_x(), element.cell_y()))
             .collect();
         assert_eq!(
             elements,
@@ -702,13 +704,18 @@ mod tests {
         assert_eq!(Color::Alpha(0).to_f32_array(), [1.0, 1.0, 1.0, 0.5]);
         // Gradient-only entries skip colour processing like the reference.
         assert_eq!(Color::Gradient.to_f32_array(), [1.0, 1.0, 1.0, 1.0]);
-        assert_eq!(
-            Color::AlphaGradient(0).to_f32_array(),
-            [1.0, 1.0, 1.0, 1.0]
-        );
+        assert_eq!(Color::AlphaGradient(0).to_f32_array(), [1.0, 1.0, 1.0, 1.0]);
         // Gradients are left untinted, matching the reference engine.
         assert_eq!(
-            Color::RgbGradient(Rgb { r: 127, g: -128, b: 0 }, Rgb::default()).to_f32_array(),
+            Color::RgbGradient(
+                Rgb {
+                    r: 127,
+                    g: -128,
+                    b: 0
+                },
+                Rgb::default()
+            )
+            .to_f32_array(),
             [1.0, 1.0, 1.0, 1.0]
         );
         // RGBA carries an explicit, non-doubled alpha.

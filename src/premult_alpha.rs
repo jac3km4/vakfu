@@ -6,7 +6,6 @@
 //! `Rgba8Unorm`; the built-in shaders and tint behavior are unchanged.
 
 use std::any::TypeId;
-use hashbrown::HashMap;
 
 use bevy::core_pipeline::core_2d::Transparent2d;
 use bevy::prelude::*;
@@ -16,6 +15,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::{GpuResourceAppExt, Render, RenderApp, RenderSystems};
 use bevy::sprite_render::{DrawSprite, RenderMaterial2dInstances, SpriteMeshMaterial};
+use hashbrown::HashMap;
 
 pub struct PremultAlphaPlugin;
 

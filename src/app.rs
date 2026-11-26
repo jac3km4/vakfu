@@ -23,7 +23,7 @@ use crate::assets::{
     open_archive,
 };
 use crate::camera::{
-    CameraController, MainCamera, OverlayCamera, OVERLAY_LAYER, WORLD_LAYER,
+    CameraController, MainCamera, OVERLAY_LAYER, OverlayCamera, WORLD_LAYER,
     camera_controller_system, camera_system,
 };
 use crate::premult_alpha;

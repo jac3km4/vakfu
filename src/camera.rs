@@ -20,7 +20,6 @@ pub struct MainCamera;
 #[derive(Component)]
 pub struct OverlayCamera;
 
-
 #[derive(Clone, Resource)]
 pub struct CameraController {
     pub dragging: bool,
@@ -295,7 +294,10 @@ mod tests {
         assert_eq!(smooth_position(Vec3::ZERO, target, 2.0), target);
         assert_eq!(smooth_position(Vec3::ZERO, target, -1.0), Vec3::ZERO);
         // Within 0.01 of the target the value snaps exactly.
-        assert_eq!(smooth_position(Vec3::new(9.995, 0.0, 0.0), target, 0.1), target);
+        assert_eq!(
+            smooth_position(Vec3::new(9.995, 0.0, 0.0), target, 0.1),
+            target
+        );
     }
 
     #[test]
@@ -310,10 +312,7 @@ mod tests {
     #[test]
     fn is_pointer_over_ui_checks_canvas_rect() {
         let mut ctx = egui::Context::default();
-        let canvas = Some(Rect::from_corners(
-            Vec2::ZERO,
-            Vec2::new(100.0, 100.0),
-        ));
+        let canvas = Some(Rect::from_corners(Vec2::ZERO, Vec2::new(100.0, 100.0)));
 
         assert!(!is_pointer_over_ui(
             &mut ctx,

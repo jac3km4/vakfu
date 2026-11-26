@@ -4,19 +4,19 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bevy::ecs::system::SystemParam;
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use bevy::tasks::{AsyncComputeTaskPool, Task, futures_lite::future};
+use bevy::tasks::futures_lite::future;
+use bevy::tasks::{AsyncComputeTaskPool, Task};
 use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
     Animation, DayLightTable, Frames, GroupVisibility, LightDef, LightMap, LightingState, Map,
-    MapChunk, MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, TgamMaskLibrary,
-    element_hashcode, iso_to_screen, open_archive, round_up_to_power_of_two, screen_to_iso,
-    sorted_altitude_order,
+    MapChunk, MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, TgamMaskLibrary, element_hashcode,
+    iso_to_screen, open_archive, round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
 };
 use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
@@ -749,9 +749,7 @@ impl MapRenderer {
         candidates
             .iter()
             .copied()
-            .find(|elem| {
-                self.is_opaque_at_world(elem, wx, wy, images, elapsed, 8)
-            })
+            .find(|elem| self.is_opaque_at_world(elem, wx, wy, images, elapsed, 8))
             .or_else(|| {
                 candidates
                     .into_iter()
@@ -1045,9 +1043,8 @@ pub fn load_map_system(params: LoadMapParams<'_, '_>) {
         let maps_path = catalog.maps_path.clone();
         let sprites = catalog.sprites.clone();
         let masks = (*masks).clone();
-        let task = pool.spawn(async move {
-            load_renderer(&maps_path, target_map_id, &sprites, &masks)
-        });
+        let task =
+            pool.spawn(async move { load_renderer(&maps_path, target_map_id, &sprites, &masks) });
         pending_load.task = Some((target_map_id, task));
     }
 
@@ -1252,10 +1249,7 @@ fn sync_sprite(
 /// shadow and night-light intensities from that colour. The settings therefore
 /// only carry the two inputs; the resulting [`LightingState`] is cached here for
 /// the renderer and the editor.
-pub fn day_light_system(
-    table: Res<'_, DayLightTable>,
-    mut settings: ResMut<'_, MapViewSettings>,
-) {
+pub fn day_light_system(table: Res<'_, DayLightTable>, mut settings: ResMut<'_, MapViewSettings>) {
     if table.is_empty() {
         return;
     }
@@ -1510,8 +1504,7 @@ fn camera_group(rtree: &RTree<Renderable>, center: Vec2) -> i32 {
         // Each candidate is projected back at its own elevation: `height`
         // shifts screen Y, so a shared `0` would miss raised indoor floors.
         .filter(|elem| {
-            screen_to_iso(center.x, center.y, i32::from(elem.cell_z))
-                == (elem.cell_x, elem.cell_y)
+            screen_to_iso(center.x, center.y, i32::from(elem.cell_z)) == (elem.cell_x, elem.cell_y)
         })
         .max_by(|a, b| a.position.z.total_cmp(&b.position.z))
         .map_or(0, |elem| elem.group)
@@ -1800,10 +1793,7 @@ mod tests {
         }
         let (frames, _) = Frames::try_read(&bytes, (LittleEndian, 2u8)).unwrap();
 
-        let layout = atlas_layout_parts(
-            UVec2::new(20, 12),
-            &Animation::Frames(Arc::new(frames)),
-        );
+        let layout = atlas_layout_parts(UVec2::new(20, 12), &Animation::Frames(Arc::new(frames)));
         assert_eq!(layout.size, UVec2::new(64, 32));
         assert_eq!(
             layout.textures,
@@ -1920,9 +1910,7 @@ mod tests {
         // settings did not change; the new map starts from default lighting.
         app.world_mut()
             .insert_resource(test_renderer(vec![test_renderable(2, 1.0, 0)]));
-        app.world_mut()
-            .resource_mut::<MapCatalog>()
-            .current_map_id = 2;
+        app.world_mut().resource_mut::<MapCatalog>().current_map_id = 2;
         app.update();
         assert_eq!(tinted(&app), expected);
     }
@@ -2483,10 +2471,7 @@ mod tests {
                 .map(|elem| elem.position.z)
                 .reduce(f32::max)
                 .unwrap();
-            assert!(
-                z > max,
-                "frontmost {z} is not above the current top {max}"
-            );
+            assert!(z > max, "frontmost {z} is not above the current top {max}");
             assert!((Z_MIN..=Z_MAX).contains(&z));
             renderer.insert_element(test_renderable(next_uid, z, next_uid as i64));
             next_uid += 1;
@@ -2500,7 +2485,10 @@ mod tests {
                 .map(|elem| elem.position.z)
                 .reduce(f32::min)
                 .unwrap();
-            assert!(z < min, "backmost {z} is not below the current bottom {min}");
+            assert!(
+                z < min,
+                "backmost {z} is not below the current bottom {min}"
+            );
             assert!((Z_MIN..=Z_MAX).contains(&z));
             renderer.insert_element(test_renderable(next_uid, z, next_uid as i64));
             next_uid += 1;

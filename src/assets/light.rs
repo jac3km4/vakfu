@@ -73,11 +73,7 @@ impl LightDef {
             return [0.0; 3];
         }
         let k = night_light_intensity * 2.0;
-        [
-            self.lights[0] * k,
-            self.lights[1] * k,
-            self.lights[2] * k,
-        ]
+        [self.lights[0] * k, self.lights[1] * k, self.lights[2] * k]
     }
 
     /// The effective cell colour under full daytime shadow intensity.
@@ -250,7 +246,6 @@ impl PointLight2d {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct LightCell {
     pub cell_x: i32,
@@ -411,10 +406,7 @@ mod tests {
 
         let def = cell.layer_colors.get(&1620).unwrap();
         assert!(def.allow_outdoor_lighting);
-        assert_eq!(
-            def.ambiance_light,
-            [2.0, 128.0 / 255.0 * 2.0, 0.0]
-        );
+        assert_eq!(def.ambiance_light, [2.0, 128.0 / 255.0 * 2.0, 0.0]);
         assert_eq!(def.shadows, [128.0 / 255.0; 3]);
         assert_eq!(def.lights, [0.5, -0.5, -0.5]);
         assert!(def.has_shadows);
@@ -454,10 +446,7 @@ mod tests {
     #[test]
     fn effective_day_color_applies_shadows_then_caps() {
         // No shadows: the ambient colour is used unchanged.
-        assert_eq!(
-            LightDef::DEFAULT.effective_day_color(),
-            [1.0, 1.0, 1.0]
-        );
+        assert_eq!(LightDef::DEFAULT.effective_day_color(), [1.0, 1.0, 1.0]);
 
         // 1 * 0.5 * 2 = 1.0, 1 * 1.0 * 2 = 2.0 -> 1.05, 1 * 0.1 * 2 = 0.2.
         // `ClampLightLitModifier` only caps the ceiling, so 0.2 is kept.

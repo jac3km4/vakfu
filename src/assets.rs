@@ -17,9 +17,9 @@ use bevy::image::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
-use hashbrown::HashMap;
 pub use day_light::{DayLightError, DayLightTable};
 pub use groups::GroupVisibility;
+use hashbrown::HashMap;
 pub use light::{LightDef, LightMap, LightingState, PointLight2d};
 pub use map::{
     Map, MapChunk, MapElementDetails, Rgba, TINT_SCALE, element_hashcode, iso_cell_diamond,
@@ -174,16 +174,15 @@ pub(crate) fn open_archive(path: &Path) -> Result<zip::ZipArchive<BufReader<File
             format!("failed to open archive '{}': {err}", path.display()),
         )
     })?;
-    zip::ZipArchive::new(BufReader::new(file)).map_err(|err| match err {
-        zip::result::ZipError::Io(io_err) => {
-            zip::result::ZipError::Io(std::io::Error::new(
+    zip::ZipArchive::new(BufReader::new(file))
+        .map_err(|err| match err {
+            zip::result::ZipError::Io(io_err) => zip::result::ZipError::Io(std::io::Error::new(
                 io_err.kind(),
                 format!("failed to read archive '{}': {io_err}", path.display()),
-            ))
-        }
-        other => other,
-    })
-    .map_err(AssetError::from)
+            )),
+            other => other,
+        })
+        .map_err(AssetError::from)
 }
 
 /// Reads `name` from an already-open archive into memory.
@@ -318,10 +317,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "vakfu-{name}-{}-{unique}.jar",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("vakfu-{name}-{}-{unique}.jar", std::process::id()))
     }
 
     fn read_bytes(source: &JarAssetSource, name: &str) -> Result<Vec<u8>, AssetReaderError> {
@@ -408,6 +404,9 @@ mod tests {
             metadata_error,
             Some(AssetReaderError::NotFound(path.to_owned()))
         );
-        assert_eq!(metadata_bytes, Err(AssetReaderError::NotFound(path.to_owned())));
+        assert_eq!(
+            metadata_bytes,
+            Err(AssetReaderError::NotFound(path.to_owned()))
+        );
     }
 }

@@ -219,9 +219,7 @@ impl Frames {
     /// Uses the precomputed running end times so the lookup is logarithmic in
     /// the frame count instead of scanning every frame.
     pub fn frame_index_at(&self, elapsed: u32) -> usize {
-        let index = self
-            .cumulative_ends
-            .partition_point(|&end| end <= elapsed);
+        let index = self.cumulative_ends.partition_point(|&end| end <= elapsed);
         index.min(self.frame_durations.len().saturating_sub(1))
     }
 
@@ -425,8 +423,7 @@ mod tests {
     #[test]
     fn sprite_definition_parses_static_fields() {
         let bytes = static_definition(42, 0b1101_0011);
-        let (definition, consumed) =
-            MapSpriteDefinition::try_read(&bytes, LittleEndian).unwrap();
+        let (definition, consumed) = MapSpriteDefinition::try_read(&bytes, LittleEndian).unwrap();
         assert_eq!(consumed, bytes.len());
 
         assert_eq!(definition.id(), 42);
@@ -469,10 +466,7 @@ mod tests {
 
         let starts: Vec<u32> = frames.iter().map(|frame| frame.time).collect();
         assert_eq!(starts, vec![0, 100]);
-        let coords: Vec<[u16; 2]> = frames
-            .iter()
-            .map(|frame| [frame.x, frame.y])
-            .collect();
+        let coords: Vec<[u16; 2]> = frames.iter().map(|frame| [frame.x, frame.y]).collect();
         assert_eq!(coords, vec![[0, 0], [32, 0]]);
         assert_eq!(frames.frame_coords(1), Some([32, 0]));
         assert_eq!(frames.frame_coords(2), None);
@@ -487,8 +481,7 @@ mod tests {
     #[test]
     fn sprite_library_reads_empty_and_populated_input() {
         let empty_bytes = 0u32.to_le_bytes();
-        let (empty, consumed) =
-            MapSpriteLibrary::try_read(&empty_bytes, LittleEndian).unwrap();
+        let (empty, consumed) = MapSpriteLibrary::try_read(&empty_bytes, LittleEndian).unwrap();
         assert!(empty.is_empty());
         assert_eq!(empty.len(), 0);
         assert_eq!(consumed, empty_bytes.len());

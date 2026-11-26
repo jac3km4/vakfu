@@ -1,8 +1,7 @@
 use bevy::ecs::change_detection::DetectChangesMut;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::resource::Resource;
-use bevy::ecs::system::SystemParam;
-use bevy::ecs::system::{Local, Res, ResMut};
+use bevy::ecs::system::{Local, Res, ResMut, SystemParam};
 use bevy_egui::{EguiContexts, egui};
 
 use crate::assets::{DayLightTable, LightingState};

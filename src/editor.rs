@@ -61,7 +61,10 @@ impl EditorTool {
 pub enum EditAction {
     Place(Renderable),
     Remove(Renderable),
-    Replace { before: Renderable, after: Renderable },
+    Replace {
+        before: Renderable,
+        after: Renderable,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -432,8 +435,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
     let scroll_margin_x = viewport_ui.style().spacing.scroll.bar_width
         + viewport_ui.style().spacing.scroll.bar_inner_margin
         + viewport_ui.style().spacing.scroll.bar_outer_margin;
-    let min_panel_width =
-        palette_grid_width(PALETTE_MIN_COLS) + panel_margin_x + scroll_margin_x;
+    let min_panel_width = palette_grid_width(PALETTE_MIN_COLS) + panel_margin_x + scroll_margin_x;
     let default_panel_width =
         palette_grid_width(PALETTE_DEFAULT_COLS) + panel_margin_x + scroll_margin_x;
 
@@ -451,8 +453,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                     edited_settings.layer_filter_on = false;
                 }
                 for &layer in renderer.available_layers() {
-                    let active =
-                        edited_settings.layer_filter_on && edited_settings.layer == layer;
+                    let active = edited_settings.layer_filter_on && edited_settings.layer == layer;
                     if ui.selectable_label(active, format!("L{layer}")).clicked() {
                         edited_settings.layer_filter_on = true;
                         edited_settings.layer = layer;
@@ -505,8 +506,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             }
 
             const PALETTE_PAGE_SIZE: usize = 200;
-            if !editor.palette_only_used
-                && editor.sorted_sprite_ids.len() != catalog.sprites.len()
+            if !editor.palette_only_used && editor.sorted_sprite_ids.len() != catalog.sprites.len()
             {
                 let mut ids: Vec<i32> = catalog.sprites.iter().map(|(&id, _)| id).collect();
                 ids.sort_unstable();
@@ -744,10 +744,8 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                                 ui.label(label);
                                 let response = ui.add(widget);
                                 changed |= response.changed();
-                                edit_started |=
-                                    response.drag_started() || response.gained_focus();
-                                edit_finished |=
-                                    response.drag_stopped() || response.lost_focus();
+                                edit_started |= response.drag_started() || response.gained_focus();
+                                edit_finished |= response.drag_stopped() || response.lost_focus();
                                 ui.end_row();
                             };
 
@@ -882,9 +880,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                         ui.end_row();
 
                         ui.label("Alt Order");
-                        ui.add(
-                            egui::DragValue::new(&mut editor.brush.altitude_order).speed(0.2),
-                        );
+                        ui.add(egui::DragValue::new(&mut editor.brush.altitude_order).speed(0.2));
                         ui.end_row();
 
                         ui.label("Layer");
@@ -1128,11 +1124,8 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
                         {
                             editor.selected_uid = Some(picked.uid);
                             renderer.dragged_entity = picked.id;
-                            let hover = screen_to_iso(
-                                world_pos.x,
-                                world_pos.y,
-                                i32::from(picked.cell_z),
-                            );
+                            let hover =
+                                screen_to_iso(world_pos.x, world_pos.y, i32::from(picked.cell_z));
                             editor.drag_state = Some(DragState {
                                 uid: picked.uid,
                                 cell_offset: (picked.cell_x - hover.0, picked.cell_y - hover.1),
@@ -1547,10 +1540,7 @@ pub fn editor_overlay_system(
                 cell_y,
                 i32::from(elem.cell_z) - i32::from(elem.height),
             );
-            (
-                sx - f32::from(elem.origin.0),
-                sy + f32::from(elem.origin.1),
-            )
+            (sx - f32::from(elem.origin.0), sy + f32::from(elem.origin.1))
         } else {
             (elem.position.x, elem.position.y)
         };

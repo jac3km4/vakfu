@@ -224,10 +224,7 @@ mod tests {
         let jar = gfx.join("9.jar");
         write_jar(&jar, &[("groups.lib", &[0, 0, 1])]);
 
-        assert!(matches!(
-            open_groups(&jar),
-            Err(AssetError::Decoding(_))
-        ));
+        assert!(matches!(open_groups(&jar), Err(AssetError::Decoding(_))));
 
         std::fs::remove_dir_all(root).unwrap();
     }
