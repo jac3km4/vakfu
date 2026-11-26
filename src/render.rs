@@ -740,7 +740,7 @@ impl MapRenderer {
             .locate_in_envelope_intersecting(AABB::from_point((wx, wy)))
             .filter(|elem| {
                 (!settings.layer_filter_on || settings.layer == elem.layer)
-                    && (!settings.group_filter_on || settings.group == elem.group / 1000)
+                    && (!settings.group_filter_on || settings.group == elem.group)
                     && visibility_mask_allows(elem.visibility_mask, settings.visibility_mask)
             })
             .collect();
@@ -1147,7 +1147,7 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
         if settings.layer_filter_on && settings.layer != elem.layer {
             continue;
         }
-        if settings.group_filter_on && settings.group != elem.group / 1000 {
+        if settings.group_filter_on && settings.group != elem.group {
             continue;
         }
         if !visibility_mask_allows(elem.visibility_mask, settings.visibility_mask) {
@@ -1347,25 +1347,48 @@ fn group_target_alpha(visibility: &GroupVisibility, from: i32, group: i32) -> f3
     }
 }
 
+/// Whether automatic `groups.lib` fading applies to the current settings.
+fn auto_group_fade_enabled(settings: &MapViewSettings, has_groups: bool) -> bool {
+    has_groups && settings.auto_group_visibility && !settings.group_filter_on
+}
+
 /// Fades elements when their group becomes visible or hidden.
 ///
 /// `GroupLayerManager` keys this on the group under the camera; elements with
 /// a hidden group fade to zero alpha over `FADE_TIME` (300 ms). This is the
 /// only system that changes [`Renderable::group_alpha`], so a fade-out is never
 /// cut short by the renderer's culling pass.
+///
+/// Disabling [`MapViewSettings::auto_group_visibility`] or isolating a group
+/// with the group filter makes every element opaque, so indoor rooms and roofs
+/// can be inspected wherever the camera is.
 pub fn group_fade_system(
     time: Res<'_, Time>,
     cameras: Query<'_, '_, &Transform, With<MainCamera>>,
     catalog: Res<'_, MapCatalog>,
     groups: Res<'_, GroupVisibilityState>,
+    settings: Res<'_, MapViewSettings>,
     mut render_state: ResMut<'_, MapRenderer>,
     mut last_map_id: Local<'_, Option<i32>>,
 ) {
     let map_changed = *last_map_id != Some(catalog.current_map_id);
     *last_map_id = Some(catalog.current_map_id);
 
-    let Some(visibility) = groups.0.as_ref() else {
-        // Without visibility metadata every element is fully opaque.
+    // Keep the group reported by the UI current, but only write on change so an
+    // idle camera does not invalidate `MapRenderer` every frame.
+    let camera_group_key = cameras
+        .single()
+        .ok()
+        .map(|transform| camera_group(&render_state.rtree, transform.translation.truncate()));
+    if let Some(camera_group_key) = camera_group_key
+        && render_state.active_camera_group != camera_group_key
+    {
+        render_state.active_camera_group = camera_group_key;
+    }
+
+    let automatic = auto_group_fade_enabled(&settings, groups.0.is_some());
+    let Some(visibility) = groups.0.as_ref().filter(|_| automatic) else {
+        // Manual control: every element stays fully opaque.
         if map_changed
             || render_state
                 .rtree
@@ -1378,15 +1401,13 @@ pub fn group_fade_system(
         }
         return;
     };
-    let Ok(transform) = cameras.single() else {
-        return;
-    };
 
-    let from = camera_group(&render_state.rtree, transform.translation.truncate());
+    let from = camera_group_key.unwrap_or(render_state.active_camera_group);
     let needs_update = map_changed
-        || render_state.rtree.iter().any(|elem| {
-            elem.group_alpha != group_target_alpha(visibility, from, elem.group)
-        });
+        || render_state
+            .rtree
+            .iter()
+            .any(|elem| elem.group_alpha != group_target_alpha(visibility, from, elem.group));
     if !needs_update {
         return;
     }
@@ -2009,6 +2030,122 @@ mod tests {
         // The front element has faded with its group; the visible one wins.
         let picked = renderer.pick_at_world(5.0, -5.0, &settings, &images, Duration::ZERO);
         assert_eq!(picked.map(|elem| elem.uid), Some(2));
+    }
+
+    #[test]
+    fn pick_at_world_filters_by_the_exact_group_key() {
+        let mut front = test_renderable(1, 10.0, 1);
+        // Group keys are compared exactly, not scaled (the old code used `/ 1000`).
+        front.group = 1000;
+        let back = test_renderable(2, 5.0, 0);
+        let renderer = test_renderer(vec![front, back]);
+        let images = Assets::<bevy::image::Image>::default();
+        let mut settings = MapViewSettings {
+            group_filter_on: true,
+            group: 0,
+            ..MapViewSettings::default()
+        };
+
+        // The front element belongs to another group; the filter skips it.
+        let picked = renderer.pick_at_world(5.0, -5.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked.map(|elem| elem.uid), Some(2));
+
+        settings.group = 1000;
+        let picked = renderer.pick_at_world(5.0, -5.0, &settings, &images, Duration::ZERO);
+        assert_eq!(picked.map(|elem| elem.uid), Some(1));
+    }
+
+    /// A one-layer `groups.lib` table that hides every non-zero group from the
+    /// outdoor group `0`.
+    fn outdoor_only_visibility() -> GroupVisibility {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // layer_count -> 1
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // no entries
+        GroupVisibility::parse(&bytes).unwrap()
+    }
+
+    fn group_alpha_of(app: &App, uid: u64) -> f32 {
+        app.world()
+            .resource::<MapRenderer>()
+            .get_element(uid)
+            .expect("element is still indexed")
+            .group_alpha
+    }
+
+    #[test]
+    fn disabling_auto_group_visibility_reveals_every_group() {
+        use byte::TryRead;
+        use byte::ctx::LittleEndian;
+
+        let mut hidden = test_renderable(1, 5.0, 0);
+        hidden.group = 5;
+        hidden.group_alpha = 0.0;
+        let other = test_renderable(2, 6.0, 1);
+
+        let (sprites, _) = MapSpriteLibrary::try_read(&0u32.to_le_bytes(), LittleEndian).unwrap();
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(MapCatalog {
+                maps_path: std::path::PathBuf::new(),
+                sprites: Arc::new(sprites),
+                available_maps: vec![1],
+                current_map_id: 1,
+            })
+            .insert_resource(GroupVisibilityState(Some(outdoor_only_visibility())))
+            .insert_resource(MapViewSettings::default())
+            .insert_resource(test_renderer(vec![hidden, other]))
+            .add_systems(Update, group_fade_system);
+
+        // The camera starts outdoors (`group 0`), which hides group 5.
+        app.update();
+        assert_eq!(group_alpha_of(&app, 1), 0.0);
+        assert_eq!(group_alpha_of(&app, 2), 1.0);
+
+        // Manual control reveals the indoor group instead of fading it away.
+        app.world_mut()
+            .resource_mut::<MapViewSettings>()
+            .auto_group_visibility = false;
+        app.update();
+        assert_eq!(group_alpha_of(&app, 1), 1.0);
+
+        // The group filter also overrides automatic hiding.
+        {
+            let mut settings = app.world_mut().resource_mut::<MapViewSettings>();
+            settings.auto_group_visibility = true;
+            settings.group_filter_on = true;
+        }
+        app.update();
+        assert_eq!(group_alpha_of(&app, 1), 1.0);
+    }
+
+    #[test]
+    fn group_fade_reports_the_camera_group() {
+        use byte::TryRead;
+        use byte::ctx::LittleEndian;
+
+        let (sprites, _) = MapSpriteLibrary::try_read(&0u32.to_le_bytes(), LittleEndian).unwrap();
+        let transform = Transform::from_xyz(0.0, 0.0, 0.0);
+        let mut elem = test_renderable(1, 5.0, 0);
+        elem.group = 2000;
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(MapCatalog {
+                maps_path: std::path::PathBuf::new(),
+                sprites: Arc::new(sprites),
+                available_maps: vec![1],
+                current_map_id: 1,
+            })
+            .insert_resource(GroupVisibilityState(Some(outdoor_only_visibility())))
+            .insert_resource(MapViewSettings::default())
+            .insert_resource(test_renderer(vec![elem]))
+            .add_systems(Update, group_fade_system);
+
+        app.world_mut().spawn((MainCamera, transform));
+        app.update();
+        assert_eq!(
+            app.world().resource::<MapRenderer>().active_camera_group(),
+            2000
+        );
     }
 
     #[test]

@@ -13,6 +13,11 @@ pub struct MapViewSettings {
     pub layer: u8,
     pub group_filter_on: bool,
     pub group: i32,
+    /// Fade groups using `groups.lib` and the group under the camera centre.
+    ///
+    /// Disable this (or enable the group filter) to reveal every element at
+    /// once, including indoor rooms and roofs the camera is not inside.
+    pub auto_group_visibility: bool,
     /// Visibility-mask bits requested from the map, mirroring
     /// `DisplayedScreenWorld.getLODMask`: `1` = minimum, `3` = average and
     /// `7` = maximum detail. An element is shown when all of its own mask bits
@@ -32,6 +37,7 @@ impl Default for MapViewSettings {
             layer: 0,
             group_filter_on: false,
             group: 0,
+            auto_group_visibility: true,
             visibility_mask: 7,
             enable_light: true,
             auto_daylight: false,
