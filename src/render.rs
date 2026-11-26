@@ -1329,11 +1329,15 @@ fn render(
 
 /// Returns the group key of the topmost element at the camera centre.
 fn camera_group(rtree: &RTree<Renderable>, center: Vec2) -> i32 {
-    let (cell_x, cell_y) = screen_to_iso(center.x, center.y, 0);
     let point = AABB::from_point((center.x, center.y));
     rtree
         .locate_in_envelope_intersecting(point)
-        .filter(|elem| elem.cell_x == cell_x && elem.cell_y == cell_y)
+        // Each candidate is projected back at its own elevation: `height`
+        // shifts screen Y, so a shared `0` would miss raised indoor floors.
+        .filter(|elem| {
+            screen_to_iso(center.x, center.y, i32::from(elem.cell_z))
+                == (elem.cell_x, elem.cell_y)
+        })
         .max_by(|a, b| a.position.z.total_cmp(&b.position.z))
         .map_or(0, |elem| elem.group)
 }
@@ -1669,6 +1673,23 @@ mod tests {
             !group_alpha_visible(alpha),
             "an element is culled only once the fade-out finishes"
         );
+    }
+
+    #[test]
+    fn camera_group_matches_elevated_cells() {
+        let (x, y) = iso_to_screen(5, 5, 12);
+        let mut elem = test_renderable(1, 10.0, 0);
+        elem.cell_x = 5;
+        elem.cell_y = 5;
+        elem.cell_z = 12;
+        elem.group = 2000;
+        elem.position = Vec3::new(x, y, 10.0);
+        let renderer = test_renderer(vec![elem]);
+
+        // The same screen point projects to a different cell at elevation 0;
+        // candidates must be resolved at their own `cell_z`.
+        assert_ne!(screen_to_iso(x, y, 0), (5, 5));
+        assert_eq!(camera_group(&renderer.rtree, Vec2::new(x, y)), 2000);
     }
 
     #[test]
