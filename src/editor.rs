@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::time::Duration;
 
 use bevy::camera::visibility::RenderLayers;
@@ -524,11 +523,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             editor.palette_page = editor.palette_page.min(total_pages - 1);
             let start = editor.palette_page * PALETTE_PAGE_SIZE;
             let end = (start + PALETTE_PAGE_SIZE).min(total_sprites);
-            let page_ids: Cow<'_, [i32]> = if editor.palette_only_used {
-                Cow::Borrowed(&renderer.used_definitions()[start..end])
-            } else {
-                Cow::Owned(editor.sorted_sprite_ids[start..end].to_vec())
-            };
+            let palette_only_used = editor.palette_only_used;
 
             ui.horizontal(|ui| {
                 if ui
@@ -570,9 +565,16 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                         .floor() as usize)
                         .max(PALETTE_MIN_COLS);
 
-                    for chunk in page_ids.chunks(cols) {
+                    let mut row_start = start;
+                    while row_start < end {
+                        let row_end = (row_start + cols).min(end);
                         ui.horizontal(|ui| {
-                            for &def_id in chunk {
+                            for idx in row_start..row_end {
+                                let def_id = if palette_only_used {
+                                    renderer.used_definitions()[idx]
+                                } else {
+                                    editor.sorted_sprite_ids[idx]
+                                };
                                 let Some(def) = catalog.sprites.get(def_id) else {
                                     continue;
                                 };
@@ -676,6 +678,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                                 ));
                             }
                         });
+                        row_start = row_end;
                     }
                 });
             actual_grid_avail
