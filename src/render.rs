@@ -119,6 +119,10 @@ pub struct MapRenderer {
     center: Vec2,
     used_definitions: Vec<i32>,
     available_layers: Vec<u8>,
+    /// Group keys used by the current map's elements, for the group filters.
+    available_groups: Vec<i32>,
+    /// Group resolved under the camera centre by [`group_fade_system`].
+    active_camera_group: i32,
     /// Altitude-order counts per cell, for exact placement lookup.
     cell_altitudes: HashMap<(i32, i32), BTreeMap<u8, u32>>,
     /// Static light data, kept so edited/moved elements can resolve their cell
@@ -165,6 +169,7 @@ impl MapRenderer {
 
         let mut used_defs_set = HashSet::new();
         let mut layers_set = HashSet::new();
+        let mut groups_set = HashSet::new();
         let mut uid_envelopes = HashMap::with_capacity(elements.len());
         let mut next_uid = 1u64;
 
@@ -218,6 +223,7 @@ impl MapRenderer {
 
                 used_defs_set.insert(elem.definition_id());
                 layers_set.insert(group.layer());
+                groups_set.insert(group.key());
 
                 let renderable = Renderable {
                     uid,
@@ -261,6 +267,8 @@ impl MapRenderer {
         used_definitions.sort_unstable();
         let mut available_layers: Vec<u8> = layers_set.into_iter().collect();
         available_layers.sort_unstable();
+        let mut available_groups: Vec<i32> = groups_set.into_iter().collect();
+        available_groups.sort_unstable();
 
         let mut cell_altitudes: HashMap<(i32, i32), BTreeMap<u8, u32>> = HashMap::new();
         for elem in &renderables {
@@ -283,6 +291,8 @@ impl MapRenderer {
             center,
             used_definitions,
             available_layers,
+            available_groups,
+            active_camera_group: 0,
             cell_altitudes,
             light_map,
             masks: TgamMaskLibrary::default(),
@@ -303,6 +313,16 @@ impl MapRenderer {
 
     pub fn available_layers(&self) -> &[u8] {
         &self.available_layers
+    }
+
+    /// Returns every group key used by the current map's elements.
+    pub fn available_groups(&self) -> &[i32] {
+        &self.available_groups
+    }
+
+    /// Returns the group resolved under the camera centre on the last fade tick.
+    pub fn active_camera_group(&self) -> i32 {
+        self.active_camera_group
     }
 
     /// Returns the shared image handle and atlas layout for `def`.
@@ -615,6 +635,9 @@ impl MapRenderer {
         if let Err(idx) = self.available_layers.binary_search(&elem.layer) {
             self.available_layers.insert(idx, elem.layer);
         }
+        if let Err(idx) = self.available_groups.binary_search(&elem.group) {
+            self.available_groups.insert(idx, elem.group);
+        }
         self.rtree.insert(elem);
         self.register_altitude(cell, altitude_order);
     }
@@ -628,7 +651,7 @@ impl MapRenderer {
             .clone();
         let removed = self.rtree.remove(&target)?;
         self.unregister_altitude((removed.cell_x, removed.cell_y), removed.altitude_order);
-        self.prune_unused_catalog_entries(removed.definition_id, removed.layer);
+        self.prune_unused_catalog_entries(&removed);
         if removed.id == self.dragged_entity {
             self.dragged_entity = None;
         }
@@ -669,15 +692,21 @@ impl MapRenderer {
         if let Err(idx) = self.available_layers.binary_search(&elem.layer) {
             self.available_layers.insert(idx, elem.layer);
         }
+        if let Err(idx) = self.available_groups.binary_search(&elem.group) {
+            self.available_groups.insert(idx, elem.group);
+        }
         self.rtree.insert(elem);
         self.register_altitude(cell, altitude_order);
-        self.prune_unused_catalog_entries(old.definition_id, old.layer);
+        self.prune_unused_catalog_entries(&old);
         Some(old)
     }
 
-    /// Drops a definition or layer from the editor's palette indices once no
+    /// Drops a definition, layer or group from the editor's catalogs once no
     /// element references it anymore.
-    fn prune_unused_catalog_entries(&mut self, definition_id: i32, layer: u8) {
+    fn prune_unused_catalog_entries(&mut self, removed: &Renderable) {
+        let definition_id = removed.definition_id;
+        let layer = removed.layer;
+        let group = removed.group;
         if !self
             .rtree
             .iter()
@@ -690,6 +719,11 @@ impl MapRenderer {
             && let Ok(index) = self.available_layers.binary_search(&layer)
         {
             self.available_layers.remove(index);
+        }
+        if !self.rtree.iter().any(|elem| elem.group == group)
+            && let Ok(index) = self.available_groups.binary_search(&group)
+        {
+            self.available_groups.remove(index);
         }
     }
 
@@ -1637,6 +1671,8 @@ mod tests {
             center: Vec2::ZERO,
             used_definitions: Vec::new(),
             available_layers: Vec::new(),
+            available_groups: Vec::new(),
+            active_camera_group: 0,
             cell_altitudes: HashMap::new(),
             light_map: LightMap::default(),
             masks: TgamMaskLibrary::default(),
@@ -1662,22 +1698,7 @@ mod tests {
                 available_maps: vec![1, 2],
                 current_map_id: 1,
             })
-            .insert_resource(MapRenderer {
-                rtree: RTree::new(),
-                uid_envelopes: HashMap::new(),
-                next_uid: 1,
-                visible: HashSet::new(),
-                spare_visible: HashSet::new(),
-                pending_despawns: Vec::new(),
-                dragged_entity: None,
-                sprite_assets: HashMap::new(),
-                center: Vec2::ZERO,
-                used_definitions: Vec::new(),
-                available_layers: Vec::new(),
-                cell_altitudes: HashMap::new(),
-            light_map: LightMap::default(),
-            masks: TgamMaskLibrary::default(),
-            })
+            .insert_resource(test_renderer(Vec::new()))
             .insert_resource(CameraController::default())
             .insert_resource(PendingMapLoad {
                 task: Some((2, pending_task(&pool))),
@@ -2093,6 +2114,8 @@ mod tests {
             center: Vec2::ZERO,
             used_definitions: vec![10, 99],
             available_layers: vec![0],
+            available_groups: vec![0],
+            active_camera_group: 0,
             cell_altitudes: HashMap::new(),
             light_map: LightMap::default(),
             masks: TgamMaskLibrary::default(),
@@ -2127,22 +2150,7 @@ mod tests {
 
     #[test]
     fn altitude_index_tracks_inserts_updates_and_removals() {
-        let mut renderer = MapRenderer {
-            rtree: RTree::new(),
-            uid_envelopes: HashMap::new(),
-            next_uid: 1,
-            visible: HashSet::new(),
-            spare_visible: HashSet::new(),
-            pending_despawns: Vec::new(),
-            dragged_entity: None,
-            sprite_assets: HashMap::new(),
-            center: Vec2::ZERO,
-            used_definitions: Vec::new(),
-            available_layers: Vec::new(),
-            cell_altitudes: HashMap::new(),
-            light_map: LightMap::default(),
-            masks: TgamMaskLibrary::default(),
-        };
+        let mut renderer = test_renderer(Vec::new());
         assert_eq!(renderer.next_altitude_order_at(1, 2), 0);
 
         renderer.register_altitude((1, 2), 3);
@@ -2164,38 +2172,45 @@ mod tests {
     }
 
     #[test]
-    fn removing_elements_prunes_unused_definitions_and_layers() {
+    fn removing_elements_prunes_unused_definitions_layers_and_groups() {
         let mut renderer = test_renderer(Vec::new());
 
         renderer.insert_element(test_renderable(1, 5.0, 0));
         let mut other = test_renderable(2, 6.0, 1);
         other.definition_id = 2;
         other.layer = 1;
+        other.group = 7;
         renderer.insert_element(other);
 
         assert_eq!(renderer.used_definitions(), [1, 2]);
         assert_eq!(renderer.available_layers(), [0, 1]);
+        assert_eq!(renderer.available_groups(), [0, 7]);
 
         renderer.remove_element(1);
         assert_eq!(renderer.used_definitions(), [2]);
         assert_eq!(renderer.available_layers(), [1]);
+        assert_eq!(renderer.available_groups(), [7]);
 
         renderer.remove_element(2);
         assert!(renderer.used_definitions().is_empty());
         assert!(renderer.available_layers().is_empty());
+        assert!(renderer.available_groups().is_empty());
     }
 
     #[test]
-    fn moving_the_last_element_off_a_layer_prunes_that_layer() {
+    fn moving_the_last_element_off_a_layer_or_group_prunes_them() {
         let mut renderer = test_renderer(Vec::new());
         renderer.insert_element(test_renderable(1, 5.0, 0));
         assert_eq!(renderer.available_layers(), [0]);
+        assert_eq!(renderer.available_groups(), [0]);
 
         let mut moved = renderer.get_element(1).unwrap().clone();
         moved.layer = 1;
+        moved.group = 3;
         renderer.update_element(moved);
 
         assert_eq!(renderer.available_layers(), [1]);
+        assert_eq!(renderer.available_groups(), [3]);
     }
 
     #[test]
