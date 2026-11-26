@@ -693,56 +693,49 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                     .num_columns(2)
                     .spacing([8.0, 6.0])
                     .show(ui, |ui| {
-                        ui.label("Cell X");
-                        let response = ui.add(egui::DragValue::new(&mut edited.cell_x).speed(0.2));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
+                        let mut track_row =
+                            |ui: &mut egui::Ui, label: &str, widget: egui::DragValue<'_>| {
+                                ui.label(label);
+                                let response = ui.add(widget);
+                                changed |= response.changed();
+                                edit_started |=
+                                    response.drag_started() || response.gained_focus();
+                                edit_finished |=
+                                    response.drag_stopped() || response.lost_focus();
+                                ui.end_row();
+                            };
 
-                        ui.label("Cell Y");
-                        let response = ui.add(egui::DragValue::new(&mut edited.cell_y).speed(0.2));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
-
-                        ui.label("Cell Z");
-                        let response = ui.add(egui::DragValue::new(&mut edited.cell_z).speed(0.2));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
-
-                        ui.label("Height");
-                        let response = ui.add(egui::DragValue::new(&mut edited.height).speed(0.2));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
-
-                        ui.label("Alt Order");
-                        let response =
-                            ui.add(egui::DragValue::new(&mut edited.altitude_order).speed(0.2));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
-
-                        ui.label("Layer");
-                        let response =
-                            ui.add(egui::DragValue::new(&mut edited.layer).range(0..=127));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
-
-                        ui.label("Group");
-                        let response = ui.add(egui::DragValue::new(&mut edited.group));
-                        changed |= response.changed();
-                        edit_started |= response.drag_started() || response.gained_focus();
-                        edit_finished |= response.drag_stopped() || response.lost_focus();
-                        ui.end_row();
+                        track_row(
+                            ui,
+                            "Cell X",
+                            egui::DragValue::new(&mut edited.cell_x).speed(0.2),
+                        );
+                        track_row(
+                            ui,
+                            "Cell Y",
+                            egui::DragValue::new(&mut edited.cell_y).speed(0.2),
+                        );
+                        track_row(
+                            ui,
+                            "Cell Z",
+                            egui::DragValue::new(&mut edited.cell_z).speed(0.2),
+                        );
+                        track_row(
+                            ui,
+                            "Height",
+                            egui::DragValue::new(&mut edited.height).speed(0.2),
+                        );
+                        track_row(
+                            ui,
+                            "Alt Order",
+                            egui::DragValue::new(&mut edited.altitude_order).speed(0.2),
+                        );
+                        track_row(
+                            ui,
+                            "Layer",
+                            egui::DragValue::new(&mut edited.layer).range(0..=127),
+                        );
+                        track_row(ui, "Group", egui::DragValue::new(&mut edited.group));
 
                         ui.label("Tint");
                         let mut rgba = [
