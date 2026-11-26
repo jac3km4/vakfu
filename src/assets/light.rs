@@ -331,6 +331,13 @@ pub struct LightMap {
 impl LightMap {
     pub fn load<R: Read + Seek>(input: R) -> Result<LightMap, AssetError> {
         let mut archive = zip::ZipArchive::new(input)?;
+        Self::load_archive(&mut archive)
+    }
+
+    /// Loads a light map from an already-open zip archive.
+    pub fn load_archive<R: Read + Seek>(
+        archive: &mut zip::ZipArchive<R>,
+    ) -> Result<LightMap, AssetError> {
         let mut light_maps = HashMap::new();
 
         for i in 0..archive.len() {

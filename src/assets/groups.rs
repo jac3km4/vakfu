@@ -1,9 +1,9 @@
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
+use std::io::{Read, Seek};
 
 use byte::BytesExt;
 use byte::ctx::LittleEndian;
+
+use super::{AssetError, read_archive_entry};
 
 /// Upper bound on the visibility matrix size, guarding against malformed
 /// headers. `Vec<bool>` is bit-packed, so this caps the allocation at 2 MiB.
@@ -59,33 +59,19 @@ impl GroupVisibility {
         })
     }
 
-    /// Loads `groups.lib` from the map's gfx archive.
+    /// Loads `groups.lib` from an already-open map gfx archive.
     ///
     /// The game configuration declares
     /// `groupsFile=jar:file:./contents/maps/gfx/%d.jar!/groups.lib`, so the
-    /// visibility table lives in the same per-map jar as the map chunks.
-    pub fn load_from_map(maps_path: &Path, map_id: i32) -> Result<Self, String> {
-        let jar_path = maps_path.join("gfx").join(format!("{map_id}.jar"));
-        let file = File::open(&jar_path)
-            .map_err(|err| format!("failed to open {}: {err}", jar_path.display()))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|err| format!("failed to read {}: {err}", jar_path.display()))?;
-        let mut entry = archive.by_name("groups.lib").map_err(|err| {
-            format!("failed to find groups.lib in {}: {err}", jar_path.display())
-        })?;
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut bytes).map_err(|err| {
-            format!(
-                "failed to read groups.lib from {}: {err}",
-                jar_path.display()
-            )
-        })?;
-        Self::parse(&bytes).map_err(|err| {
-            format!(
-                "failed to parse groups.lib from {}: {err:?}",
-                jar_path.display()
-            )
-        })
+    /// visibility table lives in the same per-map jar as the map chunks. The
+    /// caller opens that archive once and shares it with the chunk reader.
+    pub fn load_from_archive<R: Read + Seek>(
+        archive: &mut zip::ZipArchive<R>,
+    ) -> Result<Option<Self>, AssetError> {
+        let Some(bytes) = read_archive_entry(archive, "groups.lib")? else {
+            return Ok(None);
+        };
+        Ok(Some(Self::parse(&bytes)?))
     }
 
     /// Returns whether `layer` (a group key) is visible from `from`.
@@ -109,8 +95,9 @@ impl GroupVisibility {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
     use std::io::Write;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::*;
 
@@ -195,28 +182,52 @@ mod tests {
         writer.finish().unwrap();
     }
 
+    fn open_groups(path: &Path) -> Result<Option<GroupVisibility>, AssetError> {
+        let file = File::open(path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        GroupVisibility::load_from_archive(&mut archive)
+    }
+
     #[test]
     fn loads_groups_lib_from_the_map_jar() {
         let root = temporary_root("jar");
         let gfx = root.join("gfx");
         std::fs::create_dir_all(&gfx).unwrap();
         let groups = empty_visibility();
-        write_jar(&gfx.join("42.jar"), &[("groups.lib", &groups)]);
+        let jar = gfx.join("42.jar");
+        write_jar(&jar, &[("groups.lib", &groups)]);
 
-        let visibility = GroupVisibility::load_from_map(&root, 42).unwrap();
+        let visibility = open_groups(&jar).unwrap().unwrap();
         assert_eq!(visibility.layer_count(), 1);
 
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn missing_groups_lib_is_an_error() {
+    fn missing_groups_lib_is_not_an_error() {
         let root = temporary_root("missing");
         let gfx = root.join("gfx");
         std::fs::create_dir_all(&gfx).unwrap();
-        write_jar(&gfx.join("7.jar"), &[("map", &[])]);
+        let jar = gfx.join("7.jar");
+        write_jar(&jar, &[("map", &[])]);
 
-        assert!(GroupVisibility::load_from_map(&root, 7).is_err());
+        assert!(open_groups(&jar).unwrap().is_none());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_groups_lib_reports_a_decode_error() {
+        let root = temporary_root("malformed");
+        let gfx = root.join("gfx");
+        std::fs::create_dir_all(&gfx).unwrap();
+        let jar = gfx.join("9.jar");
+        write_jar(&jar, &[("groups.lib", &[0, 0, 1])]);
+
+        assert!(matches!(
+            open_groups(&jar),
+            Err(AssetError::Decoding(_))
+        ));
 
         std::fs::remove_dir_all(root).unwrap();
     }

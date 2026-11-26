@@ -21,6 +21,16 @@ impl Map {
     /// Loads a map from a zip archive containing chunk files.
     pub fn load<R: Read + Seek>(input: R) -> Result<Map, AssetError> {
         let mut archive = zip::ZipArchive::new(input)?;
+        Self::load_archive(&mut archive)
+    }
+
+    /// Loads a map from an already-open zip archive.
+    ///
+    /// Sharing the archive lets callers read optional sidecar entries such as
+    /// `groups.lib` without opening and indexing the jar a second time.
+    pub fn load_archive<R: Read + Seek>(
+        archive: &mut zip::ZipArchive<R>,
+    ) -> Result<Map, AssetError> {
         let mut chunks = Vec::with_capacity(archive.len());
 
         for i in 0..archive.len() {

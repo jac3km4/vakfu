@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs::File;
 use std::mem;
 use std::path::Path;
 use std::sync::Arc;
@@ -16,7 +15,7 @@ use rstar::{AABB, RTree, RTreeObject};
 use crate::assets::{
     Animation, Frames, GroupVisibility, LightDef, LightMap, LightingState, Map, MapChunk,
     MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, TgamMaskLibrary, element_hashcode,
-    iso_to_screen, round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
+    iso_to_screen, open_archive, round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
 };
 use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
@@ -79,7 +78,10 @@ pub struct GroupVisibilityState(pub Option<GroupVisibility>);
 
 #[derive(Resource, Default)]
 pub struct PendingMapLoad {
-    task: Option<(i32, Task<anyhow::Result<MapRenderer>>)>,
+    task: Option<(
+        i32,
+        Task<anyhow::Result<(MapRenderer, Option<GroupVisibility>)>>,
+    )>,
 }
 
 impl PendingMapLoad {
@@ -879,24 +881,36 @@ pub fn load_renderer(
     map_id: i32,
     sprites: &MapSpriteLibrary,
     masks: &TgamMaskLibrary,
-) -> anyhow::Result<MapRenderer> {
+) -> anyhow::Result<(MapRenderer, Option<GroupVisibility>)> {
     let map_path = maps_path.join("gfx").join(format!("{map_id}.jar"));
     let light_path = maps_path.join("light").join(format!("{map_id}.jar"));
 
-    let map_file = File::open(&map_path).map_err(|err| {
+    let mut map_archive = open_archive(&map_path).map_err(|err| {
         anyhow::anyhow!("failed to open map archive {}: {err}", map_path.display())
     })?;
-    let map = Map::load(map_file)
+    let map = Map::load_archive(&mut map_archive)
         .map_err(|err| anyhow::anyhow!("failed to load map from {}: {err}", map_path.display()))?;
+    // The visibility table lives in the same jar as the chunks; read it while
+    // the central directory is already open instead of reopening the archive.
+    let group_visibility = match GroupVisibility::load_from_archive(&mut map_archive) {
+        Ok(visibility) => visibility,
+        Err(err) => {
+            warn!(
+                "could not load group visibility from {}: {err}",
+                map_path.display()
+            );
+            None
+        }
+    };
 
     let light_map = if light_path.exists() {
-        let light_file = File::open(&light_path).map_err(|err| {
+        let mut light_archive = open_archive(&light_path).map_err(|err| {
             anyhow::anyhow!(
                 "failed to open light archive {}: {err}",
                 light_path.display()
             )
         })?;
-        LightMap::load(light_file).map_err(|err| {
+        LightMap::load_archive(&mut light_archive).map_err(|err| {
             anyhow::anyhow!(
                 "failed to load light map from {}: {err}",
                 light_path.display()
@@ -908,7 +922,7 @@ pub fn load_renderer(
 
     let mut renderer = MapRenderer::new(&map, sprites, light_map);
     renderer.masks = TgamMaskLibrary::clone(masks);
-    Ok(renderer)
+    Ok((renderer, group_visibility))
 }
 
 #[derive(SystemParam)]
@@ -955,7 +969,7 @@ pub fn load_map_system(params: LoadMapParams<'_, '_>) {
         let map_id = *map_id;
         pending_load.task = None;
         match result {
-            Ok(new_renderer) => {
+            Ok((new_renderer, group_visibility)) => {
                 render_state.despawn_all(&mut commands);
                 let center = new_renderer.center();
                 camera_controller.current_position = Vec3::new(center.x, center.y, 0.0);
@@ -966,13 +980,7 @@ pub fn load_map_system(params: LoadMapParams<'_, '_>) {
                 }
                 *render_state = new_renderer;
                 catalog.current_map_id = map_id;
-                match GroupVisibility::load_from_map(&catalog.maps_path, map_id) {
-                    Ok(visibility) => groups.0 = Some(visibility),
-                    Err(err) => {
-                        warn!("could not load group visibility: {err}");
-                        groups.0 = None;
-                    }
-                }
+                groups.0 = group_visibility;
                 info!("Switched to map {map_id}");
             }
             Err(err) => {
@@ -1531,7 +1539,9 @@ mod tests {
         }
     }
 
-    fn pending_task(pool: &bevy::tasks::TaskPool) -> Task<anyhow::Result<MapRenderer>> {
+    fn pending_task(
+        pool: &bevy::tasks::TaskPool,
+    ) -> Task<anyhow::Result<(MapRenderer, Option<GroupVisibility>)>> {
         pool.spawn(future::pending())
     }
 

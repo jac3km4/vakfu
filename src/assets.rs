@@ -5,7 +5,7 @@ mod sprite;
 mod tgam;
 
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -158,7 +158,7 @@ impl JarAssetSource {
 }
 
 /// Opens the archive, formatting I/O failures with the archive path.
-fn open_archive(path: &Path) -> Result<zip::ZipArchive<BufReader<File>>, AssetError> {
+pub(crate) fn open_archive(path: &Path) -> Result<zip::ZipArchive<BufReader<File>>, AssetError> {
     let file = File::open(path).map_err(|err| {
         std::io::Error::new(
             err.kind(),
@@ -175,6 +175,24 @@ fn open_archive(path: &Path) -> Result<zip::ZipArchive<BufReader<File>>, AssetEr
         other => other,
     })
     .map_err(AssetError::from)
+}
+
+/// Reads `name` from an already-open archive into memory.
+///
+/// Returns `Ok(None)` when the archive has no such entry, letting callers treat
+/// optional sidecar files such as `groups.lib` as absent rather than invalid.
+pub(crate) fn read_archive_entry<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, AssetError> {
+    let mut entry = match archive.by_name(name) {
+        Ok(entry) => entry,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let mut bytes = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
+    entry.read_to_end(&mut bytes)?;
+    Ok(Some(bytes))
 }
 
 /// Opens the archive for a read, formatting I/O failures with the archive path.

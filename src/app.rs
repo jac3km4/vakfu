@@ -14,7 +14,6 @@ use anyhow::bail;
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::CameraUpdateSystems;
 use bevy::camera::visibility::RenderLayers;
-use bevy::log::warn;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
@@ -149,16 +148,8 @@ impl LoadedWorld {
             anyhow::anyhow!("failed to open asset archive {}: {err}", gfx_path.display())
         })?;
 
-        let group_visibility = match GroupVisibility::load_from_map(&maps_path, map_id) {
-            Ok(visibility) => Some(visibility),
-            Err(err) => {
-                warn!("could not load group visibility: {err}");
-                None
-            }
-        };
-
         let masks = TgamMaskLibrary::default();
-        let renderer = load_renderer(&maps_path, map_id, &sprites, &masks)?;
+        let (renderer, group_visibility) = load_renderer(&maps_path, map_id, &sprites, &masks)?;
         let center = renderer.center();
         let camera_controller = CameraController {
             target_position: Vec3::new(center.x, center.y, 0.0),
