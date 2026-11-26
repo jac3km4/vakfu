@@ -40,6 +40,80 @@ impl Default for MapViewSettings {
     }
 }
 
+/// Draws the shared map selector: previous, searchable combo box and next.
+pub fn map_selector_ui(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    catalog: &MapCatalog,
+    search_filter: &mut String,
+    change_map: &mut MessageWriter<'_, ChangeMapEvent>,
+) {
+    let current_idx = catalog
+        .available_maps
+        .iter()
+        .position(|&id| id == catalog.current_map_id);
+
+    let has_prev = current_idx.is_some_and(|idx| idx > 0);
+    if ui.add_enabled(has_prev, egui::Button::new("◀")).clicked()
+        && let Some(idx) = current_idx
+    {
+        change_map.write(ChangeMapEvent(catalog.available_maps[idx - 1]));
+    }
+
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(catalog.current_map_id.to_string())
+        .width(100.0)
+        .show_ui(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("🔍");
+                ui.text_edit_singleline(search_filter);
+            });
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    for &map_id in &catalog.available_maps {
+                        let map_str = map_id.to_string();
+                        if !search_filter.is_empty() && !map_str.contains(&**search_filter) {
+                            continue;
+                        }
+                        let is_selected = catalog.current_map_id == map_id;
+                        if ui.selectable_label(is_selected, &map_str).clicked() {
+                            change_map.write(ChangeMapEvent(map_id));
+                        }
+                    }
+                });
+        });
+
+    let has_next = current_idx.is_some_and(|idx| idx + 1 < catalog.available_maps.len());
+    if ui.add_enabled(has_next, egui::Button::new("▶")).clicked()
+        && let Some(idx) = current_idx
+    {
+        change_map.write(ChangeMapEvent(catalog.available_maps[idx + 1]));
+    }
+}
+
+/// Draws the shared time-of-day lighting controls.
+///
+/// Callers apply [`MapViewSettings::auto_daylight`] before calling this, and
+/// gate the whole block on `enable_light` where appropriate.
+pub fn lighting_controls_ui(ui: &mut egui::Ui, settings: &mut MapViewSettings) {
+    ui.checkbox(&mut settings.auto_daylight, "Auto daylight");
+    ui.add_enabled_ui(!settings.auto_daylight, |ui| {
+        ui.add(
+            egui::Slider::new(&mut settings.lighting.shadow_intensity, 0.0..=1.0).text("Shadows"),
+        );
+        ui.add(
+            egui::Slider::new(&mut settings.lighting.night_light_intensity, 0.0..=1.0)
+                .text("Night lights"),
+        );
+    });
+    ui.horizontal(|ui| {
+        ui.label("Sun colour");
+        ui.color_edit_button_rgb(&mut settings.lighting.sun_color);
+    });
+}
+
 pub fn settings_ui_system(
     mut contexts: EguiContexts<'_, '_>,
     mut settings: ResMut<'_, MapViewSettings>,
@@ -56,53 +130,13 @@ pub fn settings_ui_system(
         .show(contexts.ctx_mut()?, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Map:");
-
-                let current_idx = catalog
-                    .available_maps
-                    .iter()
-                    .position(|&id| id == catalog.current_map_id);
-
-                let has_prev = current_idx.is_some_and(|idx| idx > 0);
-                if ui.add_enabled(has_prev, egui::Button::new("◀")).clicked()
-                    && let Some(idx) = current_idx
-                {
-                    change_map.write(ChangeMapEvent(catalog.available_maps[idx - 1]));
-                }
-
-                egui::ComboBox::from_id_salt("map_selector")
-                    .selected_text(catalog.current_map_id.to_string())
-                    .width(100.0)
-                    .show_ui(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("🔍");
-                            ui.text_edit_singleline(&mut *search_filter);
-                        });
-                        ui.separator();
-                        egui::ScrollArea::vertical()
-                            .max_height(200.0)
-                            .show(ui, |ui| {
-                                for &map_id in &catalog.available_maps {
-                                    let map_str = map_id.to_string();
-                                    if !search_filter.is_empty()
-                                        && !map_str.contains(&**search_filter)
-                                    {
-                                        continue;
-                                    }
-                                    let is_selected = catalog.current_map_id == map_id;
-                                    if ui.selectable_label(is_selected, &map_str).clicked() {
-                                        change_map.write(ChangeMapEvent(map_id));
-                                    }
-                                }
-                            });
-                    });
-
-                let has_next =
-                    current_idx.is_some_and(|idx| idx + 1 < catalog.available_maps.len());
-                if ui.add_enabled(has_next, egui::Button::new("▶")).clicked()
-                    && let Some(idx) = current_idx
-                {
-                    change_map.write(ChangeMapEvent(catalog.available_maps[idx + 1]));
-                }
+                map_selector_ui(
+                    ui,
+                    "map_selector",
+                    &catalog,
+                    &mut search_filter,
+                    &mut change_map,
+                );
             });
 
             ui.separator();
@@ -129,27 +163,7 @@ pub fn settings_ui_system(
             });
             ui.checkbox(&mut edited_settings.enable_light, "Enable light");
             ui.add_enabled_ui(edited_settings.enable_light, |ui| {
-                ui.checkbox(&mut edited_settings.auto_daylight, "Auto daylight");
-                ui.add_enabled_ui(!edited_settings.auto_daylight, |ui| {
-                    ui.add(
-                        egui::Slider::new(
-                            &mut edited_settings.lighting.shadow_intensity,
-                            0.0..=1.0,
-                        )
-                        .text("Shadows"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut edited_settings.lighting.night_light_intensity,
-                            0.0..=1.0,
-                        )
-                        .text("Night lights"),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Sun colour");
-                    ui.color_edit_button_rgb(&mut edited_settings.lighting.sun_color);
-                });
+                lighting_controls_ui(ui, &mut edited_settings);
             });
         });
     settings.set_if_neq(edited_settings);

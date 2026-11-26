@@ -17,7 +17,7 @@ use crate::render::{
     ChangeMapEvent, MapCatalog, MapRenderer, MapSprite, Renderable, RenderableSpec,
     atlas_layout_parts, premultiplied_tint,
 };
-use crate::settings::MapViewSettings;
+use crate::settings::{MapViewSettings, lighting_controls_ui, map_selector_ui};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorTool {
@@ -352,77 +352,19 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
 
             ui.separator();
             ui.label("Map:");
-            let current_idx = catalog
-                .available_maps
-                .iter()
-                .position(|&id| id == catalog.current_map_id);
-
-            let has_prev = current_idx.is_some_and(|idx| idx > 0);
-            if ui.add_enabled(has_prev, egui::Button::new("◀")).clicked()
-                && let Some(idx) = current_idx
-            {
-                change_map.write(ChangeMapEvent(catalog.available_maps[idx - 1]));
-            }
-
-            egui::ComboBox::from_id_salt("editor_map_selector")
-                .selected_text(catalog.current_map_id.to_string())
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("🔍");
-                        ui.text_edit_singleline(&mut editor.map_search);
-                    });
-                    ui.separator();
-                    egui::ScrollArea::vertical()
-                        .max_height(220.0)
-                        .show(ui, |ui| {
-                            for &map_id in &catalog.available_maps {
-                                let map_str = map_id.to_string();
-                                if !editor.map_search.is_empty()
-                                    && !map_str.contains(&editor.map_search)
-                                {
-                                    continue;
-                                }
-                                let is_selected = catalog.current_map_id == map_id;
-                                if ui.selectable_label(is_selected, &map_str).clicked() {
-                                    change_map.write(ChangeMapEvent(map_id));
-                                }
-                            }
-                        });
-                });
-
-            let has_next = current_idx.is_some_and(|idx| idx + 1 < catalog.available_maps.len());
-            if ui.add_enabled(has_next, egui::Button::new("▶")).clicked()
-                && let Some(idx) = current_idx
-            {
-                change_map.write(ChangeMapEvent(catalog.available_maps[idx + 1]));
-            }
+            map_selector_ui(
+                ui,
+                "editor_map_selector",
+                &catalog,
+                &mut editor.map_search,
+                &mut change_map,
+            );
 
             ui.separator();
             ui.checkbox(&mut editor.show_grid, "Grid");
             ui.checkbox(&mut edited_settings.enable_light, "Light");
             ui.menu_button("☀", |ui| {
-                ui.checkbox(&mut edited_settings.auto_daylight, "Auto daylight");
-                ui.add_enabled_ui(!edited_settings.auto_daylight, |ui| {
-                    ui.add(
-                        egui::Slider::new(
-                            &mut edited_settings.lighting.shadow_intensity,
-                            0.0..=1.0,
-                        )
-                        .text("Shadows"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut edited_settings.lighting.night_light_intensity,
-                            0.0..=1.0,
-                        )
-                        .text("Night lights"),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Sun colour");
-                    ui.color_edit_button_rgb(&mut edited_settings.lighting.sun_color);
-                });
+                lighting_controls_ui(ui, &mut edited_settings);
             });
             if ui.button("Center").clicked() {
                 reset_cam_clicked = true;
