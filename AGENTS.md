@@ -34,6 +34,7 @@ src/main.rs           # Map viewer binary
 src/bin/editor.rs     # Map editor binary
 src/editor.rs         # Editor tools, undo/redo history, egui panels and overlay systems
 src/assets.rs         # JarAssetSource pool, TgamLoader and the TGAM mask library
+src/assets/day_light.rs # Day/night sun colours parsed from dayLight.xml
 src/assets/groups.rs  # Indoor/outdoor group visibility parsed from groups.lib
 src/assets/light.rs   # Per-cell light maps, time-of-day LightingState and point lights
 src/assets/map.rs     # Map chunks, element records, colour tags and isometric projection

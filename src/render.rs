@@ -13,9 +13,10 @@ use hashbrown::{HashMap, HashSet};
 use rstar::{AABB, RTree, RTreeObject};
 
 use crate::assets::{
-    Animation, Frames, GroupVisibility, LightDef, LightMap, LightingState, Map, MapChunk,
-    MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, TgamMaskLibrary, element_hashcode,
-    iso_to_screen, open_archive, round_up_to_power_of_two, screen_to_iso, sorted_altitude_order,
+    Animation, DayLightTable, Frames, GroupVisibility, LightDef, LightMap, LightingState, Map,
+    MapChunk, MapSpriteDefinition, MapSpriteLibrary, TINT_SCALE, TgamMaskLibrary,
+    element_hashcode, iso_to_screen, open_archive, round_up_to_power_of_two, screen_to_iso,
+    sorted_altitude_order,
 };
 use crate::camera::{CameraController, MainCamera, WORLD_LAYER};
 use crate::settings::MapViewSettings;
@@ -1244,6 +1245,28 @@ fn sync_sprite(
     }
 }
 
+/// Refreshes the effective lighting from the `dayLight.xml` table.
+///
+/// `SunLightModifier.setDayTime` interpolates the sun colour from the current
+/// season and day percentage, and `SunLightModifier.update` then derives the
+/// shadow and night-light intensities from that colour. The settings therefore
+/// only carry the two inputs; the resulting [`LightingState`] is cached here for
+/// the renderer and the editor.
+pub fn day_light_system(
+    table: Res<'_, DayLightTable>,
+    mut settings: ResMut<'_, MapViewSettings>,
+) {
+    if table.is_empty() {
+        return;
+    }
+    let sun_color = table.sun_color(settings.season, settings.day_percentage);
+    if settings.lighting.sun_color == sun_color {
+        return;
+    }
+    settings.lighting.sun_color = sun_color;
+    settings.lighting.apply_auto_daylight();
+}
+
 /// Recomputes cached lit colours when the time-of-day lighting changes.
 ///
 /// The system also retints whenever the displayed map changes: a newly loaded
@@ -1902,6 +1925,44 @@ mod tests {
             .current_map_id = 2;
         app.update();
         assert_eq!(tinted(&app), expected);
+    }
+
+    #[test]
+    fn day_light_system_derives_lighting_from_the_table() {
+        // Grey noon sun: luminance 0.5 makes `getGlobalLight` negative, so the
+        // night lights come on and the shadows switch off.
+        let table = DayLightTable::parse(
+            "<season id=\"0\">\
+                 <hour dayPercentage=\"0\" red=\"0\" green=\"0\" blue=\"0\"/>\
+                 <hour dayPercentage=\"100\" red=\"255\" green=\"255\" blue=\"255\"/>\
+             </season>",
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.insert_resource(table)
+            .init_resource::<MapViewSettings>()
+            .add_systems(Update, day_light_system);
+        app.update();
+
+        let settings = app.world().resource::<MapViewSettings>();
+        // The default day percentage is 50, halfway between black and white.
+        assert_eq!(settings.lighting.sun_color, [0.5, 0.5, 0.5]);
+        assert_eq!(settings.lighting.shadow_intensity, 0.0);
+        let expected = 2.318_223_f32.mul_add(0.25, 1.0 - 2.318_223);
+        assert!((settings.lighting.night_light_intensity - expected.abs()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn day_light_system_keeps_defaults_without_a_table() {
+        let mut app = App::new();
+        app.init_resource::<DayLightTable>()
+            .init_resource::<MapViewSettings>()
+            .add_systems(Update, day_light_system);
+        app.update();
+
+        let settings = app.world().resource::<MapViewSettings>();
+        assert_eq!(settings.lighting, LightingState::default());
     }
 
     #[test]

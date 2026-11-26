@@ -81,6 +81,15 @@ Each element has:
 - Animation data (optional)
 - `groundSoundType`: byte
 
+#### Day/night colour definitions (`dayLight.xml`)
+
+The client reads a loose `dayLight.xml` from its working directory and falls back
+to `contents/data/data.jar!/dayLight.xml`. The file contains one `<season>` per
+game-calendar season, each holding `<hour dayPercentage="0..100"
+red="0..255" green="0..255" blue="0..255"/>` entries. The sun colour is
+interpolated between the two hours surrounding the current day percentage,
+wrapping across the end of the season.
+
 
 ## Rust Implementation Comparison
 
@@ -90,7 +99,9 @@ Each element has:
 - Applying element colours, including alpha-only and gradient colour tags
 - Applying sprite properties (origin offsets, flip, before-mobile ordering, export mask)
 - Animated sprites with frame lookup and per-element phase offsets
-- Lighting: ambient/shadows/night lights, sun colour, automatic day/night intensity from sun luminance, and dynamic point lights
+- Lighting: ambient/shadows/night lights, sun colour interpolated from the
+  embedded `dayLight.xml` seasons and hours, automatic day/night intensity from
+  sun luminance, and dynamic point lights
 - LOD visibility masks (`1` / `3` / `7`)
 - Water element animation (`Sea.WATER_ELEMENTS`)
 - Indoor/outdoor group visibility from `groups.lib` with 300 ms fades
@@ -105,6 +116,9 @@ Each element has:
 4. **Ground Sound Type**: Extracted during parsing but unused.
 5. **Shaders**: The per-element shader id is ignored.
 6. **Render Tree and Stencils**: Multi-cell entity sorting, stencil mask overlays, and the specialised render tree.
-7. **Scripted Lighting / Day-Percentage Gradients**: The `dayLight` definition tables and scripted `LitSceneModifier`s are not loaded; the viewer exposes sun colour, shadows and night lights directly.
+7. **Scripted Lighting**: Scripted `LitSceneModifier`s and ambiance-driven
+   lighting overrides (the reference `MapLightingModifierModel` effect blocks)
+   are not applied, and the day percentage and season are picked manually rather
+   than following the game calendar.
 8. **Dynamic Entities, Particles and Ambiance**: `.anm` elements, particle systems, weather/cloud effects, parallax and global colour grading.
 9. **Async Chunk Streaming**: The viewer loads a whole map jar per map rather than streaming chunks around the camera.

@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 use rstar::RTreeObject;
 
 use crate::assets::{
-    Animation, LightingState, MapSpriteDefinition, iso_cell_diamond, iso_to_screen,
+    Animation, DayLightTable, LightingState, MapSpriteDefinition, iso_cell_diamond, iso_to_screen,
     round_up_to_power_of_two, screen_to_iso,
 };
 use crate::camera::{
@@ -270,6 +270,7 @@ pub struct EditorUiParams<'w, 's> {
     settings: ResMut<'w, MapViewSettings>,
     catalog: Res<'w, MapCatalog>,
     groups: Res<'w, GroupVisibilityState>,
+    day_light: Res<'w, DayLightTable>,
     renderer: ResMut<'w, MapRenderer>,
     camera_controller: ResMut<'w, CameraController>,
     editor: ResMut<'w, EditorState>,
@@ -284,6 +285,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
         mut settings,
         catalog,
         groups,
+        day_light,
         mut renderer,
         mut camera_controller,
         mut editor,
@@ -311,9 +313,6 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
     }
 
     let mut edited_settings = settings.clone();
-    if edited_settings.auto_daylight {
-        edited_settings.lighting.apply_auto_daylight();
-    }
     let mut undo_clicked = false;
     let mut redo_clicked = false;
     let mut reset_cam_clicked = false;
@@ -379,7 +378,7 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
             ui.checkbox(&mut editor.show_grid, "Grid");
             ui.checkbox(&mut edited_settings.enable_light, "Light");
             ui.menu_button("☀", |ui| {
-                lighting_controls_ui(ui, &mut edited_settings);
+                lighting_controls_ui(ui, &mut edited_settings, &day_light);
             });
             if ui.button("Center").clicked() {
                 reset_cam_clicked = true;

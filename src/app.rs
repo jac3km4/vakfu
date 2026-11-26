@@ -6,7 +6,6 @@
 //! `Update` instead of `PostUpdate`.
 
 use std::fs;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -20,7 +19,8 @@ use bevy_egui::{EguiContext, EguiGlobalSettings, EguiPlugin, PrimaryEguiContext}
 use pico_args::Arguments;
 
 use crate::assets::{
-    GroupVisibility, JarAssetSource, MapSpriteLibrary, TgamLoader, TgamMaskLibrary,
+    DayLightTable, GroupVisibility, JarAssetSource, MapSpriteLibrary, TgamLoader, TgamMaskLibrary,
+    open_archive,
 };
 use crate::camera::{
     CameraController, MainCamera, OverlayCamera, OVERLAY_LAYER, WORLD_LAYER,
@@ -29,8 +29,8 @@ use crate::camera::{
 use crate::premult_alpha;
 use crate::render::{
     ChangeMapEvent, GroupVisibilityState, MapCatalog, MapRenderer, PendingMapLoad,
-    animation_system, group_fade_system, lighting_system, load_map_system, load_renderer,
-    rendering_system, sea_system,
+    animation_system, day_light_system, group_fade_system, lighting_system, load_map_system,
+    load_renderer, rendering_system, sea_system,
 };
 use crate::settings::MapViewSettings;
 
@@ -117,10 +117,12 @@ pub struct LoadedWorld {
     pub asset_source: JarAssetSource,
     pub group_visibility: Option<GroupVisibility>,
     pub masks: TgamMaskLibrary,
+    pub day_light: DayLightTable,
 }
 
 impl LoadedWorld {
-    /// Loads the sprite library, asset archive and the first available map.
+    /// Loads the sprite library, day/night definitions, asset archive and the
+    /// first available map.
     ///
     /// The startup map can be changed from the in-app map selector, so no map
     /// id is taken from the command line. `editor_mode` only changes how the
@@ -139,14 +141,14 @@ impl LoadedWorld {
         let map_id = available_maps[0];
 
         let lib_path = maps_path.join("data.jar");
-        let sprites = Arc::new(MapSpriteLibrary::load(File::open(&lib_path).map_err(
-            |err| {
-                anyhow::anyhow!(
-                    "failed to open sprite library {}: {err}",
-                    lib_path.display()
-                )
-            },
-        )?)?);
+        let mut maps_archive = open_archive(&lib_path).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to open map data archive {}: {err}",
+                lib_path.display()
+            )
+        })?;
+        let sprites = Arc::new(MapSpriteLibrary::load_archive(&mut maps_archive)?);
+        let day_light = load_day_light(&maps_path)?;
 
         let gfx_path = maps_path.join("gfx.jar");
         let asset_source = JarAssetSource::new(&gfx_path).map_err(|err| {
@@ -176,8 +178,38 @@ impl LoadedWorld {
             asset_source,
             group_visibility,
             masks,
+            day_light,
         })
     }
+}
+
+/// Loads the day/night sun colours the client uses.
+///
+/// `defaultDayLightFile` points at `contents/data/data.jar!/dayLight.xml`; note
+/// that this is the game data jar, not `contents/maps/data.jar` (which holds
+/// `elements.lib`). A loose `dayLight.xml` beside `config.properties` takes
+/// precedence, and a missing archive is tolerated.
+fn load_day_light(maps_path: &Path) -> anyhow::Result<DayLightTable> {
+    let loose = maps_path
+        .parent()
+        .and_then(Path::parent)
+        .map(|root| root.join("dayLight.xml"));
+    let data_path = maps_path
+        .parent()
+        .map(|contents| contents.join("data").join("data.jar"));
+    let mut archive = match &data_path {
+        Some(path) if path.is_file() => Some(open_archive(path).map_err(|err| {
+            anyhow::anyhow!("failed to open data archive {}: {err}", path.display())
+        })?),
+        _ => None,
+    };
+
+    let table = DayLightTable::load(archive.as_mut(), loose.as_deref())
+        .map_err(|err| anyhow::anyhow!("failed to load day-light definitions: {err}"))?;
+    if table.is_empty() {
+        warn!("no dayLight.xml found in contents/data/data.jar; using the default sun colour");
+    }
+    Ok(table)
 }
 
 /// Shared plugins, resources and systems for both binaries.
@@ -192,6 +224,7 @@ pub struct VakfuCorePlugin {
     pub asset_source: JarAssetSource,
     pub group_visibility: Option<GroupVisibility>,
     pub masks: TgamMaskLibrary,
+    pub day_light: DayLightTable,
 }
 
 impl Plugin for VakfuCorePlugin {
@@ -218,6 +251,7 @@ impl Plugin for VakfuCorePlugin {
         })
         .register_asset_loader(TgamLoader::new(self.masks.clone()))
         .insert_resource(self.masks.clone())
+        .insert_resource(self.day_light.clone())
         .add_message::<ChangeMapEvent>()
         .insert_resource(self.catalog.clone())
         .insert_resource(self.camera_controller.clone())
@@ -237,7 +271,14 @@ impl Plugin for VakfuCorePlugin {
         )
         .add_systems(
             PostUpdate,
-            (group_fade_system, lighting_system, rendering_system, animation_system, sea_system)
+            (
+                day_light_system,
+                group_fade_system,
+                lighting_system,
+                rendering_system,
+                animation_system,
+                sea_system,
+            )
                 .chain()
                 .after(CameraUpdateSystems)
                 .before(TransformSystems::Propagate),
@@ -256,6 +297,7 @@ pub fn build_app(window_title: &str, world: LoadedWorld) -> App {
             asset_source: world.asset_source,
             group_visibility: world.group_visibility,
             masks: world.masks,
+            day_light: world.day_light,
         });
     app
 }

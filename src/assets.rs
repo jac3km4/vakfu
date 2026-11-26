@@ -1,3 +1,4 @@
+mod day_light;
 mod groups;
 mod light;
 mod map;
@@ -17,6 +18,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use byte::TryRead;
 use byte::ctx::LittleEndian;
 use hashbrown::HashMap;
+pub use day_light::{DayLightError, DayLightTable};
 pub use groups::GroupVisibility;
 pub use light::{LightDef, LightMap, LightingState, PointLight2d};
 pub use map::{

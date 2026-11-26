@@ -311,12 +311,18 @@ impl MapSpriteLibrary {
     /// Loads a library from a zip archive.
     pub fn load<R: Seek + Read>(input: R) -> Result<Self, AssetError> {
         let mut archive = zip::ZipArchive::new(input)?;
-        let mut entry = archive.by_name("elements.lib")?;
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut bytes)?;
+        Self::load_archive(&mut archive)
+    }
 
-        let (result, _) = MapSpriteLibrary::try_read(&bytes, LittleEndian)?;
-        Ok(result)
+    /// Loads a library from an already-open archive, so callers can read the
+    /// other entries of `data.jar` without opening it again.
+    pub fn load_archive<R: Seek + Read>(
+        archive: &mut zip::ZipArchive<R>,
+    ) -> Result<Self, AssetError> {
+        let bytes = super::read_archive_entry(archive, "elements.lib")?
+            .ok_or(zip::result::ZipError::FileNotFound)?;
+        let (library, _) = MapSpriteLibrary::try_read(&bytes, LittleEndian)?;
+        Ok(library)
     }
 
     /// Gets a sprite definition by ID.

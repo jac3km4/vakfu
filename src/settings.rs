@@ -1,10 +1,11 @@
 use bevy::ecs::change_detection::DetectChangesMut;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::resource::Resource;
+use bevy::ecs::system::SystemParam;
 use bevy::ecs::system::{Local, Res, ResMut};
 use bevy_egui::{EguiContexts, egui};
 
-use crate::assets::LightingState;
+use crate::assets::{DayLightTable, LightingState};
 use crate::render::{ChangeMapEvent, GroupVisibilityState, MapCatalog, MapRenderer};
 
 #[derive(Debug, Clone, PartialEq, Resource)]
@@ -24,9 +25,13 @@ pub struct MapViewSettings {
     /// are present.
     pub visibility_mask: u8,
     pub enable_light: bool,
-    /// Derive the shadow and night-light intensities from the sun colour,
-    /// matching `SunLightModifier.update` / `setLightIntensityFactor`.
-    pub auto_daylight: bool,
+    /// Game-calendar season selecting a `dayLight.xml` colour curve.
+    pub season: u8,
+    /// Position within the day, in `0..=100`, interpolating the sun colour.
+    pub day_percentage: f32,
+    /// Effective lighting. `day_light_system` refreshes the sun colour and the
+    /// shadow/night-light intensities derived from it whenever [`Self::season`]
+    /// or [`Self::day_percentage`] changes.
     pub lighting: LightingState,
 }
 
@@ -40,7 +45,8 @@ impl Default for MapViewSettings {
             auto_group_visibility: true,
             visibility_mask: 7,
             enable_light: true,
-            auto_daylight: false,
+            season: 0,
+            day_percentage: 50.0,
             lighting: LightingState::default(),
         }
     }
@@ -101,23 +107,49 @@ pub fn map_selector_ui(
 
 /// Draws the shared time-of-day lighting controls.
 ///
-/// Callers apply [`MapViewSettings::auto_daylight`] before calling this, and
-/// gate the whole block on `enable_light` where appropriate.
-pub fn lighting_controls_ui(ui: &mut egui::Ui, settings: &mut MapViewSettings) {
-    ui.checkbox(&mut settings.auto_daylight, "Auto daylight");
-    ui.add_enabled_ui(!settings.auto_daylight, |ui| {
-        ui.add(
-            egui::Slider::new(&mut settings.lighting.shadow_intensity, 0.0..=1.0).text("Shadows"),
-        );
-        ui.add(
-            egui::Slider::new(&mut settings.lighting.night_light_intensity, 0.0..=1.0)
-                .text("Night lights"),
-        );
-    });
+/// The sun colour, shadow intensity and night-light intensity all follow the
+/// `dayLight.xml` curve, so the only controls left are the season and the day
+/// percentage. Callers gate the whole block on `enable_light`.
+pub fn lighting_controls_ui(
+    ui: &mut egui::Ui,
+    settings: &mut MapViewSettings,
+    table: &DayLightTable,
+) {
+    if table.is_empty() {
+        ui.weak("No dayLight.xml in contents/data/data.jar");
+        return;
+    }
+
+    let seasons: Vec<u8> = table.season_ids().collect();
+    if let Some(&first) = seasons.first()
+        && !seasons.contains(&settings.season)
+    {
+        settings.season = first;
+    }
     ui.horizontal(|ui| {
-        ui.label("Sun colour");
-        ui.color_edit_button_rgb(&mut settings.lighting.sun_color);
+        ui.label("Season");
+        if seasons.len() > 1 {
+            egui::ComboBox::from_id_salt("day_light_season")
+                .selected_text(format!("Season {}", settings.season))
+                .width(120.0)
+                .show_ui(ui, |ui| {
+                    for &season in &seasons {
+                        ui.selectable_value(
+                            &mut settings.season,
+                            season,
+                            format!("Season {season}"),
+                        );
+                    }
+                });
+        } else {
+            ui.weak(format!("Season {}", settings.season));
+        }
     });
+    ui.add(
+        egui::Slider::new(&mut settings.day_percentage, 0.0..=100.0)
+            .text("Day")
+            .suffix("%"),
+    );
 }
 
 /// Draws a one-of-many map filter: an enable checkbox plus a combo box over the
@@ -155,19 +187,30 @@ fn map_filter_ui<T>(
         });
 }
 
-pub fn settings_ui_system(
-    mut contexts: EguiContexts<'_, '_>,
-    mut settings: ResMut<'_, MapViewSettings>,
-    catalog: Res<'_, MapCatalog>,
-    renderer: Res<'_, MapRenderer>,
-    groups: Res<'_, GroupVisibilityState>,
-    mut change_map: MessageWriter<'_, ChangeMapEvent>,
-    mut search_filter: Local<'_, String>,
-) -> bevy::prelude::Result {
+#[derive(SystemParam)]
+pub struct SettingsUiParams<'w, 's> {
+    contexts: EguiContexts<'w, 's>,
+    settings: ResMut<'w, MapViewSettings>,
+    catalog: Res<'w, MapCatalog>,
+    renderer: Res<'w, MapRenderer>,
+    groups: Res<'w, GroupVisibilityState>,
+    day_light: Res<'w, DayLightTable>,
+    change_map: MessageWriter<'w, ChangeMapEvent>,
+    search_filter: Local<'s, String>,
+}
+
+pub fn settings_ui_system(params: SettingsUiParams<'_, '_>) -> bevy::prelude::Result {
+    let SettingsUiParams {
+        mut contexts,
+        mut settings,
+        catalog,
+        renderer,
+        groups,
+        day_light,
+        mut change_map,
+        mut search_filter,
+    } = params;
     let mut edited_settings = settings.clone();
-    if edited_settings.auto_daylight {
-        edited_settings.lighting.apply_auto_daylight();
-    }
     egui::Window::new("Settings")
         .movable(false)
         .show(contexts.ctx_mut()?, |ui| {
@@ -232,7 +275,7 @@ pub fn settings_ui_system(
             });
             ui.checkbox(&mut edited_settings.enable_light, "Enable light");
             ui.add_enabled_ui(edited_settings.enable_light, |ui| {
-                lighting_controls_ui(ui, &mut edited_settings);
+                lighting_controls_ui(ui, &mut edited_settings, &day_light);
             });
         });
     settings.set_if_neq(edited_settings);
