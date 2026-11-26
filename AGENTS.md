@@ -6,8 +6,11 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Run all tests
 cargo test
 
-# Run the application (requires Ankama Games' Wakfu assets)
+# Run the viewer (requires Ankama Games' Wakfu assets)
 vakfu --path /path/to/Wakfu --map <map_id>
+
+# Run the interactive map editor (same arguments)
+editor --path /path/to/Wakfu --map <map_id>
 ```
 
 ## Boundaries
@@ -23,11 +26,22 @@ vakfu --path /path/to/Wakfu --map <map_id>
 
 ## Project Structure
 ```text
-src/main.rs       # Application entry point, CLI argument parsing, Bevy App setup
-src/assets.rs     # Asset loaders, handling Tgam (textures), Map chunks and elements, sprites
-src/render.rs     # MapRenderer resource, responsible for efficiently querying/rendering elements via RTree
-src/camera.rs     # Camera controls
-src/settings.rs   # Map View Settings and UI logic
+src/lib.rs            # Library root, re-exporting the shared modules below
+src/app.rs            # Shared CLI parsing, archive discovery, LoadedWorld and VakfuCorePlugin
+src/main.rs           # Map viewer binary
+src/bin/editor.rs     # Map editor binary
+src/editor.rs         # Editor tools, undo/redo history, egui panels and overlay systems
+src/assets.rs         # JarAssetSource pool, TgamLoader and the TGAM mask library
+src/assets/groups.rs  # Indoor/outdoor group visibility parsed from groups.lib
+src/assets/light.rs   # Per-cell light maps, time-of-day LightingState and point lights
+src/assets/map.rs     # Map chunks, element records, colour tags and isometric projection
+src/assets/sprite.rs  # Sprite definitions (elements.lib), flags and animation frames
+src/assets/tgam.rs    # TGAM texture and packed alpha-mask parser
+src/render.rs         # MapRenderer R-tree index, Z ordering, culling, picking and animation
+src/premult_alpha.rs  # Premultiplied-alpha pipeline remapping for Bevy 0.20 sprites
+src/camera.rs         # Smooth pan/zoom, camera layers and shared egui input capture
+src/settings.rs       # Viewer settings UI plus shared map selector and lighting controls
+src/util.rs           # Byte parsing helpers (WithSize, WithSizePrefix)
 ```
 
 ## Testing
