@@ -46,16 +46,29 @@ pub enum Cli {
 pub struct CliArgs {
     /// Path to the `contents/maps` directory of a Wakfu installation.
     pub maps_path: PathBuf,
-    /// The requested map id, if any.
-    pub map_id: Option<i32>,
 }
 
-/// Parses the shared `--path` / `--map` arguments.
+/// Parses the shared `--path` argument.
 ///
-/// Prints `help` when requested or on error, and rejects unexpected trailing
-/// arguments.
+/// The map is chosen from the in-app selector, so there is deliberately no
+/// `--map` option. Prints `help` when requested or on error, and rejects
+/// unexpected trailing arguments.
 pub fn parse_args(help: &str) -> anyhow::Result<Cli> {
-    let mut pargs = Arguments::from_env();
+    parse_args_from(help, std::env::args_os())
+}
+
+/// [`parse_args`] over an explicit argument vector, so the accepted command
+/// line can be tested without touching the process environment.
+///
+/// `args` includes the executable name, exactly like [`std::env::args_os`].
+fn parse_args_from<I, T>(help: &str, args: I) -> anyhow::Result<Cli>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString>,
+{
+    // `Arguments::from_vec` expects the executable to already be removed.
+    let args: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).skip(1).collect();
+    let mut pargs = Arguments::from_vec(args);
 
     if pargs.contains(["-h", "--help"]) {
         print!("{help}");
@@ -66,7 +79,6 @@ pub fn parse_args(help: &str) -> anyhow::Result<Cli> {
         eprint!("{help}");
         bail!("missing required option '--path'");
     };
-    let map_id = pargs.opt_value_from_str("--map")?;
 
     let remaining = pargs.finish();
     if !remaining.is_empty() {
@@ -80,7 +92,6 @@ pub fn parse_args(help: &str) -> anyhow::Result<Cli> {
 
     Ok(Cli::Run(CliArgs {
         maps_path: game_path.join("contents").join("maps"),
-        map_id,
     }))
 }
 
@@ -109,15 +120,13 @@ pub struct LoadedWorld {
 }
 
 impl LoadedWorld {
-    /// Loads the sprite library, asset archive and initial map.
+    /// Loads the sprite library, asset archive and the first available map.
     ///
-    /// `editor_mode` only changes how the camera controller behaves; the
-    /// editor-specific systems are added by the editor binary.
-    pub fn load(
-        maps_path: PathBuf,
-        requested_map: Option<i32>,
-        editor_mode: bool,
-    ) -> anyhow::Result<Self> {
+    /// The startup map can be changed from the in-app map selector, so no map
+    /// id is taken from the command line. `editor_mode` only changes how the
+    /// camera controller behaves; the editor-specific systems are added by the
+    /// editor binary.
+    pub fn load(maps_path: PathBuf, editor_mode: bool) -> anyhow::Result<Self> {
         let available_maps = get_map_list(&maps_path).map_err(|err| {
             anyhow::anyhow!(
                 "could not read maps directory {}: {err}",
@@ -127,11 +136,7 @@ impl LoadedWorld {
         if available_maps.is_empty() {
             bail!("no map files found in {}", maps_path.join("gfx").display());
         }
-        let map_id = match requested_map {
-            Some(id) if available_maps.contains(&id) => id,
-            Some(id) => bail!("map {id} not found in {}", maps_path.join("gfx").display()),
-            None => available_maps[0],
-        };
+        let map_id = available_maps[0];
 
         let lib_path = maps_path.join("data.jar");
         let sprites = Arc::new(MapSpriteLibrary::load(File::open(&lib_path).map_err(
@@ -307,4 +312,38 @@ pub fn egui_has_primary_context(
     query: Query<'_, '_, &bevy_egui::EguiContext, With<PrimaryEguiContext>>,
 ) -> bool {
     !query.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HELP: &str = "usage: vakfu --path <PATH>\n";
+
+    #[test]
+    fn parses_the_maps_path() {
+        let Ok(Cli::Run(args)) = parse_args_from(HELP, ["vakfu", "--path", "/game"]) else {
+            panic!("expected a runnable configuration");
+        };
+        assert_eq!(args.maps_path, PathBuf::from("/game/contents/maps"));
+    }
+
+    #[test]
+    fn requires_the_path_option() {
+        assert!(parse_args_from(HELP, ["vakfu"]).is_err());
+    }
+
+    #[test]
+    fn rejects_the_removed_map_option() {
+        // Maps are picked in the UI now, so `--map` is an unknown argument.
+        assert!(parse_args_from(HELP, ["vakfu", "--path", "/game", "--map", "5"]).is_err());
+    }
+
+    #[test]
+    fn help_short_circuits_parsing() {
+        assert!(matches!(
+            parse_args_from(HELP, ["vakfu", "--help"]),
+            Ok(Cli::Help)
+        ));
+    }
 }

@@ -7,21 +7,22 @@ const HELP: &str = "\
 vakfu
 
 USAGE:
-    vakfu --path <PATH> [--map <ID>]
+    vakfu --path <PATH>
 
 FLAGS:
     -h, --help       Prints help information
 
 OPTIONS:
     --path <PATH>    Path to Ankama Games' Wakfu game directory
-    --map <ID>       Initial map ID to display (default: first discovered map)
+
+The map is chosen from the in-app selector.
 ";
 
 fn main() -> anyhow::Result<()> {
     let Cli::Run(args) = parse_args(HELP)? else {
         return Ok(());
     };
-    let world = LoadedWorld::load(args.maps_path, args.map_id, false)?;
+    let world = LoadedWorld::load(args.maps_path, false)?;
 
     let mut app = build_app("vakfu", world);
     app.add_systems(

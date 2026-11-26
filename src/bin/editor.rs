@@ -10,21 +10,22 @@ const HELP: &str = "\
 vakfu editor
 
 USAGE:
-    editor --path <PATH> [--map <ID>]
+    editor --path <PATH>
 
 FLAGS:
     -h, --help       Prints help information
 
 OPTIONS:
     --path <PATH>    Path to Ankama Games' Wakfu game directory
-    --map <ID>       Initial map ID to display (default: first discovered map)
+
+The map is chosen from the editor toolbar.
 ";
 
 fn main() -> anyhow::Result<()> {
     let Cli::Run(args) = parse_args(HELP)? else {
         return Ok(());
     };
-    let world = LoadedWorld::load(args.maps_path, args.map_id, true)?;
+    let world = LoadedWorld::load(args.maps_path, true)?;
 
     let mut app = build_app("vakfu editor", world);
     app.init_resource::<EditorState>()

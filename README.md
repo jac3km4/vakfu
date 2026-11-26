@@ -16,7 +16,9 @@ cargo build
 
 
 ```bash
-vakfu --path /home/jekky/games/Ankama/Wakfu --map 999
+vakfu --path /home/jekky/games/Ankama/Wakfu
 ```
+
+Pick a map from the Settings window.
 
 Note that this project does not include **any** authored assets. In order to run it, you may get such assets by obtaining a copy of the game Wakfu, created by Ankama Games.

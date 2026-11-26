@@ -7,11 +7,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 
 # Run the viewer (requires Ankama Games' Wakfu assets)
-vakfu --path /path/to/Wakfu --map <map_id>
+vakfu --path /path/to/Wakfu
 
 # Run the interactive map editor (same arguments)
-editor --path /path/to/Wakfu --map <map_id>
+editor --path /path/to/Wakfu
 ```
+
+Both binaries pick the map from the in-app selector.
 
 ## Boundaries
 ### Always do
