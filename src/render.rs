@@ -628,6 +628,7 @@ impl MapRenderer {
             .clone();
         let removed = self.rtree.remove(&target)?;
         self.unregister_altitude((removed.cell_x, removed.cell_y), removed.altitude_order);
+        self.prune_unused_catalog_entries(removed.definition_id, removed.layer);
         if removed.id == self.dragged_entity {
             self.dragged_entity = None;
         }
@@ -670,7 +671,26 @@ impl MapRenderer {
         }
         self.rtree.insert(elem);
         self.register_altitude(cell, altitude_order);
+        self.prune_unused_catalog_entries(old.definition_id, old.layer);
         Some(old)
+    }
+
+    /// Drops a definition or layer from the editor's palette indices once no
+    /// element references it anymore.
+    fn prune_unused_catalog_entries(&mut self, definition_id: i32, layer: u8) {
+        if !self
+            .rtree
+            .iter()
+            .any(|elem| elem.definition_id == definition_id)
+            && let Ok(index) = self.used_definitions.binary_search(&definition_id)
+        {
+            self.used_definitions.remove(index);
+        }
+        if !self.rtree.iter().any(|elem| elem.layer == layer)
+            && let Ok(index) = self.available_layers.binary_search(&layer)
+        {
+            self.available_layers.remove(index);
+        }
     }
 
     pub fn pick_at_world(
@@ -2141,6 +2161,41 @@ mod tests {
         // Saturates rather than wrapping at the top of the range.
         renderer.register_altitude((1, 2), u8::MAX);
         assert_eq!(renderer.next_altitude_order_at(1, 2), u8::MAX);
+    }
+
+    #[test]
+    fn removing_elements_prunes_unused_definitions_and_layers() {
+        let mut renderer = test_renderer(Vec::new());
+
+        renderer.insert_element(test_renderable(1, 5.0, 0));
+        let mut other = test_renderable(2, 6.0, 1);
+        other.definition_id = 2;
+        other.layer = 1;
+        renderer.insert_element(other);
+
+        assert_eq!(renderer.used_definitions(), [1, 2]);
+        assert_eq!(renderer.available_layers(), [0, 1]);
+
+        renderer.remove_element(1);
+        assert_eq!(renderer.used_definitions(), [2]);
+        assert_eq!(renderer.available_layers(), [1]);
+
+        renderer.remove_element(2);
+        assert!(renderer.used_definitions().is_empty());
+        assert!(renderer.available_layers().is_empty());
+    }
+
+    #[test]
+    fn moving_the_last_element_off_a_layer_prunes_that_layer() {
+        let mut renderer = test_renderer(Vec::new());
+        renderer.insert_element(test_renderable(1, 5.0, 0));
+        assert_eq!(renderer.available_layers(), [0]);
+
+        let mut moved = renderer.get_element(1).unwrap().clone();
+        moved.layer = 1;
+        renderer.update_element(moved);
+
+        assert_eq!(renderer.available_layers(), [1]);
     }
 
     #[test]
