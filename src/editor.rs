@@ -12,7 +12,8 @@ use hashbrown::HashMap;
 use rstar::RTreeObject;
 
 use crate::assets::{
-    Animation, LightingState, MapSpriteDefinition, iso_cell_diamond, iso_to_screen, screen_to_iso,
+    Animation, LightingState, MapSpriteDefinition, iso_cell_diamond, iso_to_screen,
+    round_up_to_power_of_two, screen_to_iso,
 };
 use crate::camera::{CameraController, MainCamera, OVERLAY_LAYER, is_pointer_over_ui};
 use crate::render::{
@@ -579,10 +580,8 @@ pub fn editor_ui_system(params: EditorUiParams<'_, '_>) -> Result {
                                     EguiVec2::new(img_w, img_h),
                                 );
 
-                                let pow2 = |v: u16| -> f32 {
-                                    let v = u32::from(v.max(1));
-                                    (if v < 2 { v } else { v.next_power_of_two() }) as f32
-                                };
+                                let pow2 =
+                                    |v: u16| round_up_to_power_of_two(u32::from(v.max(1))) as f32;
                                 // The atlas canvas follows the padded TGAM
                                 // dimensions: the sampled rectangle for static
                                 // sprites, the full sheet for animated ones.
