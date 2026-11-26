@@ -998,7 +998,6 @@ pub struct RenderParams<'w, 's> {
     atlas_layouts: ResMut<'w, Assets<TextureAtlasLayout>>,
     render_state: ResMut<'w, MapRenderer>,
     settings: Res<'w, MapViewSettings>,
-    groups: Res<'w, GroupVisibilityState>,
     sprites: MapSpriteQuery<'w, 's>,
 }
 
@@ -1010,7 +1009,6 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
         mut atlas_layouts,
         mut render_state,
         settings,
-        groups,
         mut sprites,
     } = params;
     if !render_state.pending_despawns.is_empty() {
@@ -1046,13 +1044,6 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
     } = &mut *render_state;
     seen.clear();
 
-    // The reference keys group visibility on the group under the camera (the
-    // player's walkable cell). Use the topmost element at the camera centre.
-    let group_from = groups
-        .0
-        .as_ref()
-        .map(|_| camera_group(rtree, transform.translation.truncate()));
-
     for elem in rtree.locate_in_envelope_intersecting_mut(aabb) {
         if settings.layer_filter_on && settings.layer != elem.layer {
             continue;
@@ -1063,9 +1054,9 @@ pub fn rendering_system(params: RenderParams<'_, '_>) -> Result {
         if !visibility_mask_allows(elem.visibility_mask, settings.visibility_mask) {
             continue;
         }
-        if let (Some(visibility), Some(from)) = (groups.0.as_ref(), group_from)
-            && !visibility.layer_visible(from, elem.group)
-        {
+        // `group_fade_system` is the single authority for group opacity. An
+        // element only leaves the view once its fade-out has completed.
+        if !group_alpha_visible(elem.group_alpha) {
             continue;
         }
 
@@ -1214,17 +1205,49 @@ fn fade_alpha(current: f32, target: f32, delta_secs: f32) -> f32 {
     }
 }
 
+/// Whether an element with this group fade multiplier is still drawn.
+fn group_alpha_visible(alpha: f32) -> bool {
+    alpha > 0.0
+}
+
+/// The opacity an element is fading toward for the camera's current group.
+fn group_target_alpha(visibility: &GroupVisibility, from: i32, group: i32) -> f32 {
+    if visibility.layer_visible(from, group) {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 /// Fades elements when their group becomes visible or hidden.
 ///
 /// `GroupLayerManager` keys this on the group under the camera; elements with
-/// a hidden group fade to zero alpha over `FADE_TIME` (300 ms).
+/// a hidden group fade to zero alpha over `FADE_TIME` (300 ms). This is the
+/// only system that changes [`Renderable::group_alpha`], so a fade-out is never
+/// cut short by the renderer's culling pass.
 pub fn group_fade_system(
     time: Res<'_, Time>,
     cameras: Query<'_, '_, &Transform, With<MainCamera>>,
+    catalog: Res<'_, MapCatalog>,
     groups: Res<'_, GroupVisibilityState>,
     mut render_state: ResMut<'_, MapRenderer>,
+    mut last_map_id: Local<'_, Option<i32>>,
 ) {
+    let map_changed = *last_map_id != Some(catalog.current_map_id);
+    *last_map_id = Some(catalog.current_map_id);
+
     let Some(visibility) = groups.0.as_ref() else {
+        // Without visibility metadata every element is fully opaque.
+        if map_changed
+            || render_state
+                .rtree
+                .iter()
+                .any(|elem| elem.group_alpha != 1.0)
+        {
+            for elem in &mut render_state.rtree {
+                elem.group_alpha = 1.0;
+            }
+        }
         return;
     };
     let Ok(transform) = cameras.single() else {
@@ -1232,26 +1255,24 @@ pub fn group_fade_system(
     };
 
     let from = camera_group(&render_state.rtree, transform.translation.truncate());
-    let needs_update = render_state.rtree.iter().any(|elem| {
-        let target = if visibility.layer_visible(from, elem.group) {
-            1.0
-        } else {
-            0.0
-        };
-        elem.group_alpha != target
-    });
+    let needs_update = map_changed
+        || render_state.rtree.iter().any(|elem| {
+            elem.group_alpha != group_target_alpha(visibility, from, elem.group)
+        });
     if !needs_update {
         return;
     }
 
     let delta = time.delta_secs();
     for elem in &mut render_state.rtree {
-        let target = if visibility.layer_visible(from, elem.group) {
-            1.0
+        let target = group_target_alpha(visibility, from, elem.group);
+        // Snap to the initial target on the first frame after a map load so
+        // initially hidden indoor rooms do not flash and fade out on startup.
+        elem.group_alpha = if map_changed {
+            target
         } else {
-            0.0
+            fade_alpha(elem.group_alpha, target, delta)
         };
-        elem.group_alpha = fade_alpha(elem.group_alpha, target, delta);
     }
 }
 
@@ -1630,6 +1651,24 @@ mod tests {
         assert_eq!(fade_alpha(0.0, 1.0, 0.3), 1.0);
         assert_eq!(fade_alpha(0.5, 0.0, 0.0), 0.5);
         assert!((fade_alpha(0.0, 1.0, 0.001) - (0.001 * 1000.0 / 300.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn group_fade_out_keeps_element_visible_until_alpha_reaches_zero() {
+        let mut alpha = 1.0;
+        alpha = fade_alpha(alpha, 0.0, 0.15);
+        assert!((alpha - 0.5).abs() < 1e-6);
+        assert!(
+            group_alpha_visible(alpha),
+            "an element halfway through its fade-out must still be drawn"
+        );
+
+        alpha = fade_alpha(alpha, 0.0, 0.15);
+        assert_eq!(alpha, 0.0);
+        assert!(
+            !group_alpha_visible(alpha),
+            "an element is culled only once the fade-out finishes"
+        );
     }
 
     #[test]
