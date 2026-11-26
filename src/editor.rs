@@ -15,7 +15,9 @@ use crate::assets::{
     Animation, LightingState, MapSpriteDefinition, iso_cell_diamond, iso_to_screen,
     round_up_to_power_of_two, screen_to_iso,
 };
-use crate::camera::{CameraController, MainCamera, OVERLAY_LAYER, is_pointer_over_ui};
+use crate::camera::{
+    CameraController, EguiInputState, MainCamera, OVERLAY_LAYER, egui_input_state,
+};
 use crate::render::{
     ChangeMapEvent, MapCatalog, MapRenderer, MapSprite, Renderable, RenderableSpec,
     premultiplied_tint,
@@ -933,18 +935,11 @@ pub fn editor_input_system(params: EditorInputParams<'_, '_>) {
         mut editor,
         mut sprites,
     } = params;
-    let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
-    let canvas_rect = camera_controller.canvas_rect;
-    let (is_over_egui, wants_keyboard) =
-        egui_contexts
-            .iter_mut()
-            .fold((false, false), |(over, kbd), mut context| {
-                let ctx = context.get_mut();
-                (
-                    over || is_pointer_over_ui(ctx, canvas_rect, cursor_pos),
-                    kbd || ctx.egui_wants_keyboard_input(),
-                )
-            });
+    let EguiInputState {
+        cursor_pos,
+        over_ui: is_over_egui,
+        wants_keyboard,
+    } = egui_input_state(&windows, &mut egui_contexts, camera_controller.canvas_rect);
 
     let elapsed = time.elapsed();
 
@@ -1326,11 +1321,10 @@ pub fn editor_ghost_system(params: EditorGhostParams<'_, '_>) {
         mut egui_contexts,
         mut ghosts,
     } = params;
-    let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
-    let canvas_rect = camera_controller.canvas_rect;
-    let is_over_egui = egui_contexts
-        .iter_mut()
-        .any(|mut context| is_pointer_over_ui(context.get_mut(), canvas_rect, cursor_pos));
+    let EguiInputState {
+        over_ui: is_over_egui,
+        ..
+    } = egui_input_state(&windows, &mut egui_contexts, camera_controller.canvas_rect);
 
     let should_show = editor.tool == EditorTool::Place
         && !is_over_egui

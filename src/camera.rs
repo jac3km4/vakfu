@@ -81,6 +81,37 @@ pub fn is_pointer_over_ui(
     false
 }
 
+/// Pointer and keyboard capture state of the primary egui context.
+pub struct EguiInputState {
+    /// Cursor position in window coordinates, if the pointer is in the window.
+    pub cursor_pos: Option<Vec2>,
+    /// Whether egui owns the pointer (or the cursor is outside the map canvas).
+    pub over_ui: bool,
+    /// Whether an egui widget currently wants keyboard input.
+    pub wants_keyboard: bool,
+}
+
+/// Reads the cursor and egui capture state shared by the camera and editor
+/// systems, so they all agree on when the pointer or keyboard belongs to the UI.
+pub fn egui_input_state(
+    windows: &Query<'_, '_, &'static Window>,
+    egui_contexts: &mut Query<'_, '_, &'static mut EguiContext, With<PrimaryEguiContext>>,
+    canvas_rect: Option<Rect>,
+) -> EguiInputState {
+    let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
+    let mut state = EguiInputState {
+        cursor_pos,
+        over_ui: false,
+        wants_keyboard: false,
+    };
+    for mut context in egui_contexts.iter_mut() {
+        let ctx = context.get_mut();
+        state.over_ui |= is_pointer_over_ui(ctx, canvas_rect, cursor_pos);
+        state.wants_keyboard |= ctx.egui_wants_keyboard_input();
+    }
+    state
+}
+
 #[derive(SystemParam)]
 pub struct CameraInput<'w, 's> {
     time: Res<'w, Time>,
@@ -105,17 +136,11 @@ pub fn camera_controller_system(
         mut mouse_wheel_events,
         mut egui_contexts,
     } = input;
-    let cursor_pos = windows.single().ok().and_then(Window::cursor_position);
-    let canvas_rect = state.canvas_rect;
-    let (is_over_egui, wants_keyboard) = egui_contexts
-        .iter_mut()
-        .fold((false, false), |(over, kbd), mut context| {
-            let ctx = context.get_mut();
-            (
-                over || is_pointer_over_ui(ctx, canvas_rect, cursor_pos),
-                kbd || ctx.egui_wants_keyboard_input(),
-            )
-        });
+    let EguiInputState {
+        over_ui: is_over_egui,
+        wants_keyboard,
+        ..
+    } = egui_input_state(&windows, &mut egui_contexts, state.canvas_rect);
 
     let space_held = keys.pressed(KeyCode::Space);
 
