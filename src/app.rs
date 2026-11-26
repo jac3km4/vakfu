@@ -222,7 +222,13 @@ impl Plugin for VakfuCorePlugin {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (load_map_system, camera_controller_system, camera_system).chain(),
+            (
+                load_map_system,
+                camera_controller_system,
+                camera_system,
+                sync_overlay_camera,
+            )
+                .chain(),
         )
         .add_systems(
             PostUpdate,
@@ -230,8 +236,7 @@ impl Plugin for VakfuCorePlugin {
                 .chain()
                 .after(CameraUpdateSystems)
                 .before(TransformSystems::Propagate),
-        )
-        .add_systems(PostUpdate, sync_overlay_camera.before(CameraUpdateSystems));
+        );
     }
 }
 
@@ -281,18 +286,20 @@ fn setup(mut commands: Commands<'_, '_>, camera_controller: Res<'_, CameraContro
 }
 
 /// Keeps the overlay camera aligned with the world camera every frame.
+///
+/// Only the local `Transform` is copied; Bevy's `TransformSystems::Propagate`
+/// updates the `GlobalTransform` in `PostUpdate` like any other entity.
 fn sync_overlay_camera(
     main: Query<'_, '_, &Transform, (With<MainCamera>, Without<OverlayCamera>)>,
-    mut overlay: Query<'_, '_, (&mut Transform, &mut GlobalTransform), With<OverlayCamera>>,
+    mut overlay: Query<'_, '_, &mut Transform, With<OverlayCamera>>,
 ) {
     let Ok(main_transform) = main.single() else {
         return;
     };
-    let Ok((mut transform, mut global_transform)) = overlay.single_mut() else {
+    let Ok(mut transform) = overlay.single_mut() else {
         return;
     };
     transform.set_if_neq(*main_transform);
-    global_transform.set_if_neq(GlobalTransform::from(*main_transform));
 }
 
 /// Run condition: the primary egui context exists.
